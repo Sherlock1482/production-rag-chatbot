@@ -1,0 +1,27 @@
+Name: Raj Sharma
+Role: Senior Backend Developer
+
+Experience:
+5 years of experience in backend development.
+
+Technical Skills:
+- Python
+- FastAPI
+- Django
+- Docker
+- Kubernetes
+- REST APIs
+- PostgreSQL
+- Redis
+- Git
+
+Professional Summary:
+Experienced backend developer specializing in Python-based API development.
+Built and deployed FastAPI applications using Docker and Kubernetes.
+Worked on microservices and container orchestration in production environments.
+
+Projects:
+- Developed REST APIs using FastAPI and Python.
+- Containerized applications using Docker.
+- Deployed microservices to Kubernetes clusters.
+- Implemented PostgreSQL and Redis for backend applications.

@@ -1,0 +1,26 @@
+Name: Priya Patel
+Role: Python Developer
+
+Experience:
+4 years of experience in software development.
+
+Technical Skills:
+- Python
+- Django
+- Flask
+- FastAPI
+- PostgreSQL
+- MySQL
+- REST APIs
+- Git
+- AWS
+
+Professional Summary:
+Python developer experienced in building web applications and REST APIs.
+Strong knowledge of Django, Flask, and FastAPI.
+
+Projects:
+- Developed web applications using Django.
+- Built REST APIs using Flask and FastAPI.
+- Designed database solutions using PostgreSQL.
+- Deployed applications on AWS.

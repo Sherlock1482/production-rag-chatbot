@@ -1,0 +1,27 @@
+Name: Arjun Kumar
+Role: Senior Java Developer
+
+Experience:
+6 years of experience in backend development.
+
+Technical Skills:
+- Java
+- Spring Boot
+- Microservices
+- Docker
+- Kubernetes
+- PostgreSQL
+- Kafka
+- AWS
+- Git
+
+Professional Summary:
+Backend developer specializing in Java and Spring Boot.
+Experienced in developing microservices and deploying containerized
+applications using Docker and Kubernetes.
+
+Projects:
+- Developed microservices using Spring Boot.
+- Deployed applications using Kubernetes.
+- Built event-driven systems using Kafka.
+- Managed containerized applications using Docker.
