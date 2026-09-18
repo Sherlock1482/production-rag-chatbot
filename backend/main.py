@@ -5,7 +5,10 @@ load_dotenv()
 
 import sys
 from pathlib import Path
-
+from guardrails.output_guardrail import check_output_guardrail
+from guardrails.output_guardrail import check_output_guardrail
+from guardrails.evidence_guardrail import check_evidence_guardrail
+from guardrails.input_guardrail import check_input_guardrail
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -107,12 +110,27 @@ async def chat_endpoint(request: ChatRequest):
 
         if mcp_data:
             mcp_context = f"\nLive Interview Data from MCP:\n{mcp_data}\n"
+            #input guardrail check
+        if not check_input_guardrail(request.query):
+            return {
+                "response": "I can only help with Talent Acquisition and recruitment-related questions.",
+                "sources": []
+            }
         # Step 1: Retrieve and Rerank TA documents
         relevant_docs = search_and_rerank(
             query=request.query, 
             top_k=request.top_k, 
             top_n=request.top_n
         )
+
+        if not check_evidence_guardrail(relevant_docs):
+            return {
+                "response": (
+                    "I couldn't find enough relevant information in the "
+                    "Talent Acquisition documents to answer this question accurately."
+                ),
+                "sources": []
+            }
         
         if not relevant_docs and not mcp_data:
             return {
@@ -164,6 +182,15 @@ async def chat_endpoint(request: ChatRequest):
         )
 
         ai_response = chat_completion.choices[0].message.content
+
+        if not check_output_guardrail(ai_response, relevant_docs):
+            return {
+                "response": (
+                    "I couldn't verify that the generated answer is fully "
+                    "supported by the available Talent Acquisition documents."
+                ),
+                "sources": []
+            }
 
         return {
             "response": ai_response,

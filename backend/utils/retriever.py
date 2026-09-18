@@ -77,7 +77,6 @@ def search_and_rerank(query: str, top_k: int = 5, top_n: int = 3):
     # Keep only the top_n best results
     final_top_n = ranked_docs[:top_n]
     
-    print(f"Reranked and filtered down to top {len(final_top_n)} contexts for the LLM.")
     return final_top_n
 
 if __name__ == "__main__":
