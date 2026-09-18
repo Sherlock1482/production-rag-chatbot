@@ -3,11 +3,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import sys
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from groq import Groq
 from utils.retriever import search_and_rerank
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 app = FastAPI(title="TA RAG Chatbot API", version="1.0")
 
@@ -27,12 +32,40 @@ class ChatRequest(BaseModel):
     top_k: int = 5
     top_n: int = 3
 
+MCP_SERVER_PATH = Path(__file__).resolve().parent / "mcp_server.py"
+
+
+async def call_interview_mcp(candidate_name: str = ""):
+    """
+    Connect to the TA MCP server and call the interview schedule tool.
+    """
+
+    server_params = StdioServerParameters(
+        command=sys.executable,
+        args=[str(MCP_SERVER_PATH)],
+    )
+
+    async with stdio_client(server_params) as (read, write):
+
+        async with ClientSession(read, write) as session:
+
+            await session.initialize()
+
+            result = await session.call_tool(
+                "get_interview_schedule",
+                arguments={
+                    "candidate_name": candidate_name
+                }
+            )
+
+            return result
+
 @app.get("/")
 def health_check():
     return {"status": "healthy", "domain": "Talent Acquisition (TA)"}
 
 @app.post("/chat")
-def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(request: ChatRequest):
     """
     RAG Chat endpoint for Talent Acquisition:
     1. Retrieves relevant candidate/job description chunks using vector search & reranker.
@@ -40,6 +73,40 @@ def chat_endpoint(request: ChatRequest):
     3. Generates responses using Groq (Llama-3).
     """
     try:
+
+                # Step 0: Check whether the question needs live interview data
+        # Step 0: Check whether the question needs live interview data
+        query_lower = request.query.lower()
+
+        mcp_data = None
+        mcp_context = ""
+
+        interview_keywords = [
+            "interview",
+            "schedule",
+            "scheduled",
+            "stage",
+            "status"
+        ]
+
+        if any(keyword in query_lower for keyword in interview_keywords):
+
+            candidate_names = [
+                "priya",
+                "arjun",
+                "jane"
+            ]
+
+            for name in candidate_names:
+                if name in query_lower:
+                    mcp_data = await call_interview_mcp(name)
+                    break
+
+            if mcp_data is None and "all" in query_lower:
+                mcp_data = await call_interview_mcp("")
+
+        if mcp_data:
+            mcp_context = f"\nLive Interview Data from MCP:\n{mcp_data}\n"
         # Step 1: Retrieve and Rerank TA documents
         relevant_docs = search_and_rerank(
             query=request.query, 
@@ -47,9 +114,9 @@ def chat_endpoint(request: ChatRequest):
             top_n=request.top_n
         )
         
-        if not relevant_docs:
+        if not relevant_docs and not mcp_data:
             return {
-                "response": "I'm sorry, but I couldn't find any relevant candidate profiles or job descriptions matching your query in the TA database.",
+                "response": "I'm sorry, but I couldn't find relevant information in the TA database.",
                 "sources": []
             }
 
@@ -67,12 +134,23 @@ def chat_endpoint(request: ChatRequest):
         # Step 3: Construct System Prompt with Guardrails & Citation Rules
         system_prompt = (
             "You are an expert Talent Acquisition (TA) AI assistant. "
-            "Answer the recruiter's question accurately using ONLY the provided context blocks below. "
-            "Always cite the source ID (e.g., [1], [2]) when stating candidate qualifications or job requirements. "
-            "If the answer cannot be found in the context, state clearly that the information is missing from the database."
+            "Answer the recruiter's question using the provided information. "
+            "The information may come from either the TA document database "
+            "or live interview data provided by an MCP tool. "
+            "Use the live MCP interview data when answering questions about "
+            "candidate interview schedules, stages, dates, or interviewers. "
+            "Do not invent information. "
+            "When using candidate qualifications or job requirements from documents, "
+            "cite the source ID such as [1] or [2]. "
+            "If the requested information is not available, clearly state that "
+            "the information is missing from the database."
         )
 
-        user_prompt = f"Context Documents:\n{combined_context}\n\nRecruiter Query: {request.query}"
+        user_prompt = (
+            f"Context Documents:\n{combined_context}\n"
+            f"{mcp_context}\n"
+            f"Recruiter Query: {request.query}"
+        )
 
         # Step 4: Call Groq API (Llama-3-8B-Instant)
         chat_completion = groq_client.chat.completions.create(
@@ -94,6 +172,8 @@ def chat_endpoint(request: ChatRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 if __name__ == "__main__":
     import uvicorn
