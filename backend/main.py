@@ -1,31 +1,53 @@
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
+import sys
 import shutil
-from fastapi import UploadFile, File
+from pathlib import Path
 from typing import List
 
-from utils.parser import parse_ta_document
+from dotenv import load_dotenv
 
-import sys
-from pathlib import Path
-from guardrails.output_guardrail import check_output_guardrail
-from guardrails.output_guardrail import check_output_guardrail
-from guardrails.evidence_guardrail import check_evidence_guardrail
-from guardrails.input_guardrail import check_input_guardrail
-from fastapi import FastAPI, HTTPException
+# Load environment variables
+load_dotenv()
+
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from groq import Groq
+
+from utils.parser import parse_ta_document
 from utils.retriever import search_and_rerank
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-from fastapi import FastAPI, HTTPException, UploadFile, File
 from utils.indexer import index_ta_chunks
 
-app = FastAPI(title="TA RAG Chatbot API", version="1.0")
+from guardrails.input_guardrail import check_input_guardrail
+from guardrails.evidence_guardrail import check_evidence_guardrail
+from guardrails.output_guardrail import check_output_guardrail
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+from langfuse import get_client
+
+
+# ============================================================
+# Langfuse
+# ============================================================
+
+langfuse = get_client()
+
+
+# ============================================================
+# FastAPI App
+# ============================================================
+
+app = FastAPI(
+    title="TA RAG Chatbot API",
+    version="1.0"
+)
+
+
+# ============================================================
+# CORS
+# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,70 +57,152 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Groq Client
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+# ============================================================
+# Groq Client
+# ============================================================
+
+groq_client = Groq(
+    api_key=os.getenv("GROQ_API_KEY")
+)
+
+
+# ============================================================
+# Request Model
+# ============================================================
 
 class ChatRequest(BaseModel):
     query: str
     top_k: int = 5
     top_n: int = 3
 
-MCP_SERVER_PATH = Path(__file__).resolve().parent / "mcp_server.py"
+
+# ============================================================
+# MCP Server
+# ============================================================
+
+MCP_SERVER_PATH = (
+    Path(__file__).resolve().parent / "mcp_server.py"
+)
 
 
 async def call_interview_mcp(candidate_name: str = ""):
     """
-    Connect to the TA MCP server and call the interview schedule tool.
+    Connect to the TA MCP server and call
+    the interview schedule tool.
     """
 
-    server_params = StdioServerParameters(
-        command=sys.executable,
-        args=[str(MCP_SERVER_PATH)],
-    )
+    with langfuse.start_as_current_observation(
+        as_type="span",
+        name="mcp-interview",
+        input={
+            "candidate_name": candidate_name,
+            "tool": "get_interview_schedule"
+        }
+    ) as mcp_trace:
 
-    async with stdio_client(server_params) as (read, write):
+        server_params = StdioServerParameters(
+            command=sys.executable,
+            args=[str(MCP_SERVER_PATH)],
+        )
 
-        async with ClientSession(read, write) as session:
+        async with stdio_client(
+            server_params
+        ) as (read, write):
 
-            await session.initialize()
+            async with ClientSession(
+                read,
+                write
+            ) as session:
 
-            result = await session.call_tool(
-                "get_interview_schedule",
-                arguments={
-                    "candidate_name": candidate_name
-                }
-            )
+                await session.initialize()
 
-            return result
+                result = await session.call_tool(
+                    "get_interview_schedule",
+                    arguments={
+                        "candidate_name": candidate_name
+                    }
+                )
+
+                # Record MCP result in Langfuse
+                mcp_trace.update(
+                    output={
+                        "result": str(result)
+                    }
+                )
+
+                return result
+
+
+# ============================================================
+# Health Check
+# ============================================================
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "domain": "Talent Acquisition (TA)"}
+
+    return {
+        "status": "healthy",
+        "domain": "Talent Acquisition (TA)"
+    }
+
+
+# ============================================================
+# Document Upload
+# ============================================================
 
 @app.post("/upload")
-async def upload_documents(files: List[UploadFile] = File(...)):
+async def upload_documents(
+    files: List[UploadFile] = File(...)
+):
 
     upload_dir = Path("data/uploads")
-    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    upload_dir.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
     results = []
 
     for file in files:
 
+        # ----------------------------------------------------
+        # Save uploaded file
+        # ----------------------------------------------------
+
         file_path = upload_dir / file.filename
 
-        # 1. Save uploaded file
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        with open(
+            file_path,
+            "wb"
+        ) as buffer:
 
-        # 2. Parse document
-        extracted_chunks = parse_ta_document(str(file_path))
+            shutil.copyfileobj(
+                file.file,
+                buffer
+            )
 
-        # 3. Index chunks into Qdrant
+        # ----------------------------------------------------
+        # Parse document
+        # ----------------------------------------------------
+
+        extracted_chunks = parse_ta_document(
+            str(file_path)
+        )
+
+        # ----------------------------------------------------
+        # Index document into Qdrant
+        # ----------------------------------------------------
+
         index_ta_chunks(
             extracted_chunks,
             file.filename
         )
+
+        # ----------------------------------------------------
+        # Store result
+        # ----------------------------------------------------
 
         results.append({
             "filename": file.filename,
@@ -106,150 +210,400 @@ async def upload_documents(files: List[UploadFile] = File(...)):
         })
 
     return {
-        "message": "Files uploaded, parsed, and indexed successfully",
+        "message": (
+            "Files uploaded, parsed, and indexed successfully"
+        ),
         "files": results
     }
 
+
+# ============================================================
+# Chat Endpoint
+# ============================================================
+
 @app.post("/chat")
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(
+    request: ChatRequest
+):
+
     """
-    RAG Chat endpoint for Talent Acquisition:
-    1. Retrieves relevant candidate/job description chunks using vector search & reranker.
-    2. Constructs a grounded prompt with source citations.
-    3. Generates responses using Groq (Llama-3).
+    RAG Chat endpoint for Talent Acquisition.
+
+    Flow:
+
+    1. Check for live interview data using MCP.
+    2. Run input guardrail.
+    3. Retrieve relevant documents from Qdrant.
+    4. Rerank retrieved documents.
+    5. Run evidence guardrail.
+    6. Build context.
+    7. Call Groq LLM.
+    8. Run output guardrail.
+    9. Record request/response in Langfuse.
+    10. Return final response.
     """
+
     try:
 
-                # Step 0: Check whether the question needs live interview data
-        # Step 0: Check whether the question needs live interview data
-        query_lower = request.query.lower()
+        # ====================================================
+        # Langfuse Observation
+        # ====================================================
 
-        mcp_data = None
-        mcp_context = ""
+        with langfuse.start_as_current_observation(
+            as_type="span",
+            name="ta-chat",
+            input={
+                "query": request.query
+            }
+        ) as trace:
 
-        interview_keywords = [
-            "interview",
-            "schedule",
-            "scheduled",
-            "stage",
-            "status"
-        ]
+            # =================================================
+            # Step 0: MCP Interview Data
+            # =================================================
 
-        if any(keyword in query_lower for keyword in interview_keywords):
+            query_lower = request.query.lower()
 
-            candidate_names = [
-                "priya",
-                "arjun",
-                "jane"
+            mcp_data = None
+            mcp_context = ""
+
+            interview_keywords = [
+                "interview",
+                "schedule",
+                "scheduled",
+                "stage",
+                "status"
             ]
 
-            for name in candidate_names:
-                if name in query_lower:
-                    mcp_data = await call_interview_mcp(name)
-                    break
+            # Check if this is an interview-related query
+            if any(
+                keyword in query_lower
+                for keyword in interview_keywords
+            ):
 
-            if mcp_data is None and "all" in query_lower:
-                mcp_data = await call_interview_mcp("")
+                candidate_names = [
+                    "priya",
+                    "arjun",
+                    "jane"
+                ]
 
-        if mcp_data:
-            mcp_context = f"\nLive Interview Data from MCP:\n{mcp_data}\n"
-            #input guardrail check
-        if not check_input_guardrail(request.query):
+                # Check for a specific candidate
+                for name in candidate_names:
+
+                    if name in query_lower:
+
+                        mcp_data = await call_interview_mcp(
+                            name
+                        )
+
+                        break
+
+                # Check if recruiter wants all interviews
+                if (
+                    mcp_data is None
+                    and "all" in query_lower
+                ):
+
+                    mcp_data = await call_interview_mcp(
+                        ""
+                    )
+
+            # Build MCP context
+            if mcp_data:
+
+                mcp_context = (
+                    "\nLive Interview Data from MCP:\n"
+                    f"{mcp_data}\n"
+                )
+
+            # =================================================
+            # Step 1: Input Guardrail
+            # =================================================
+
+            if not check_input_guardrail(
+                request.query
+            ):
+
+                return {
+                    "response": (
+                        "I can only help with Talent Acquisition "
+                        "and recruitment-related questions."
+                    ),
+                    "sources": []
+                }
+
+            # =================================================
+            # Step 2: Retrieve and Rerank Documents
+            # =================================================
+
+            relevant_docs = search_and_rerank(
+                query=request.query,
+                top_k=request.top_k,
+                top_n=request.top_n
+            )
+
+            # =================================================
+            # Step 3: Evidence Guardrail
+            # =================================================
+
+            if (
+                not mcp_data
+                and not check_evidence_guardrail(
+                    relevant_docs
+                )
+            ):
+
+                return {
+                    "response": (
+                        "I couldn't find enough relevant "
+                        "information in the Talent Acquisition "
+                        "documents to answer this question "
+                        "accurately."
+                    ),
+                    "sources": []
+                }
+
+            # =================================================
+            # Step 4: Check Retrieved Data
+            # =================================================
+
+            if (
+                not relevant_docs
+                and not mcp_data
+            ):
+
+                return {
+                    "response": (
+                        "I'm sorry, but I couldn't find "
+                        "relevant information in the "
+                        "TA database."
+                    ),
+                    "sources": []
+                }
+
+            # =================================================
+            # Step 5: Build Context and Sources
+            # =================================================
+
+            context_blocks = []
+            sources = []
+
+            for idx, doc in enumerate(
+                relevant_docs
+            ):
+
+                source_name = doc.get(
+                    "source",
+                    "Unknown Source"
+                )
+
+                text_content = doc.get(
+                    "text",
+                    ""
+                )
+
+                # Context for LLM
+                context_blocks.append(
+                    f"Source [{idx + 1}] "
+                    f"({source_name}):\n"
+                    f"{text_content}"
+                )
+
+                # Source information returned to frontend
+                sources.append({
+                    "id": idx + 1,
+                    "source": source_name,
+                    "text": (
+                        text_content[:150]
+                        + "..."
+                    )
+                })
+
+            combined_context = (
+                "\n\n".join(context_blocks)
+            )
+
+            # =================================================
+            # Step 6: System Prompt
+            # =================================================
+
+            system_prompt = (
+
+                "You are an expert Talent Acquisition (TA) "
+                "AI assistant. "
+
+                "Answer the recruiter's question using the "
+                "provided information. "
+
+                "The information may come from either the "
+                "TA document database or live interview data "
+                "provided by an MCP tool. "
+
+                "Use the live MCP interview data when "
+                "answering questions about candidate "
+                "interview schedules, stages, dates, "
+                "or interviewers. "
+
+                "Do not invent information. "
+
+                "When using candidate qualifications or "
+                "job requirements from documents, cite "
+                "the source ID such as [1] or [2]. "
+
+                "If the requested information is not "
+                "available, clearly state that the "
+                "information is missing from the database. "
+
+                "For interview questions, give a concise "
+                "answer using the candidate's date, stage, "
+                "and interviewer when available. "
+
+                "Do not say information is missing if "
+                "it is present in the MCP data."
+            )
+
+            # =================================================
+            # Step 7: User Prompt
+            # =================================================
+
+            user_prompt = (
+
+                f"Context Documents:\n"
+                f"{combined_context}\n"
+
+                f"{mcp_context}\n"
+
+                f"Recruiter Query: "
+                f"{request.query}"
+            )
+
+            
+
+            # =================================================
+            # Step 8: Call Groq LLM
+            # =================================================
+
+            with langfuse.start_as_current_observation(
+                as_type="generation",
+                name="groq-llm",
+                input={
+                    "query": request.query,
+                    "model": "allam-2-7b"
+                },
+                model="allam-2-7b"
+            ) as llm_trace:
+
+                chat_completion = (
+                    groq_client
+                    .chat
+                    .completions
+                    .create(
+                        model="allam-2-7b",
+
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": system_prompt
+                            },
+                            {
+                                "role": "user",
+                                "content": user_prompt
+                            }
+                        ],
+
+                        temperature=0.1,
+
+                        max_tokens=1024
+                    )
+                )
+
+                ai_response = (
+                    chat_completion
+                    .choices[0]
+                    .message
+                    .content
+                )
+
+                # Record LLM output in Langfuse
+                llm_trace.update(
+                    output={
+                        "response": ai_response
+                    }
+                )
+                # Extract LLM response
+                ai_response = (
+                    chat_completion
+                    .choices[0]
+                    .message
+                    .content
+                    )
+
+            # =================================================
+            # Step 9: Output Guardrail
+            # =================================================
+
+            if not check_output_guardrail(
+                ai_response,
+                relevant_docs,
+                mcp_context
+            ):
+
+                return {
+                    "response": (
+                        "I couldn't verify that the "
+                        "generated answer is fully "
+                        "supported by the available "
+                        "Talent Acquisition documents."
+                    ),
+                    "sources": []
+                }
+
+            # =================================================
+            # Step 10: Update Langfuse
+            # =================================================
+
+            trace.update(
+                output={
+                    "response": ai_response,
+                    "sources": sources
+                }
+            )
+
+            # =================================================
+            # Step 11: Return Response
+            # =================================================
+
             return {
-                "response": "I can only help with Talent Acquisition and recruitment-related questions.",
-                "sources": []
-            }
-        # Step 1: Retrieve and Rerank TA documents
-        relevant_docs = search_and_rerank(
-            query=request.query, 
-            top_k=request.top_k, 
-            top_n=request.top_n
-        )
-
-        if not mcp_data and not check_evidence_guardrail(relevant_docs):
-            return {
-                "response": (
-                    "I couldn't find enough relevant information in the "
-                    "Talent Acquisition documents to answer this question accurately."
-                ),
-                "sources": []
-            }
-        
-        if not relevant_docs and not mcp_data:
-            return {
-                "response": "I'm sorry, but I couldn't find relevant information in the TA database.",
-                "sources": []
+                "response": ai_response,
+                "sources": sources
             }
 
-        # Step 2: Build Context and Source Citations map
-        context_blocks = []
-        sources = []
-        for idx, doc in enumerate(relevant_docs):
-            source_name = doc.get("source", "Unknown Source")
-            text_content = doc.get("text", "")
-            context_blocks.append(f"Source [{idx+1}] ({source_name}):\n{text_content}")
-            sources.append({"id": idx + 1, "source": source_name, "text": text_content[:150] + "..."})
-
-        combined_context = "\n\n".join(context_blocks)
-
-        # Step 3: Construct System Prompt with Guardrails & Citation Rules
-        system_prompt = (
-            "You are an expert Talent Acquisition (TA) AI assistant. "
-            "Answer the recruiter's question using the provided information. "
-            "The information may come from either the TA document database "
-            "or live interview data provided by an MCP tool. "
-            "Use the live MCP interview data when answering questions about "
-            "candidate interview schedules, stages, dates, or interviewers. "
-            "Do not invent information. "
-            "When using candidate qualifications or job requirements from documents, "
-            "cite the source ID such as [1] or [2]. "
-            "If the requested information is not available, clearly state that "
-            "the information is missing from the database."
-            "For interview questions, give a concise answer using the candidate's "
-            "date, stage, and interviewer when available. Do not say information "
-            "is missing if it is present in the MCP data. "
-        )
-
-        user_prompt = (
-            f"Context Documents:\n{combined_context}\n"
-            f"{mcp_context}\n"
-            f"Recruiter Query: {request.query}"
-        )
-
-        # Step 4: Call Groq API (Llama-3-8B-Instant)
-        chat_completion = groq_client.chat.completions.create(
-            model="allam-2-7b",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.1, # Low temperature for factual, grounded answers
-            max_tokens=1024
-        )
-
-        ai_response = chat_completion.choices[0].message.content
-
-        if not check_output_guardrail(ai_response, relevant_docs,mcp_context):
-            return {
-                "response": (
-                    "I couldn't verify that the generated answer is fully "
-                    "supported by the available Talent Acquisition documents."
-                ),
-                "sources": []
-            }
-
-        return {
-            "response": ai_response,
-            "sources": sources
-        }
+    # ========================================================
+    # Error Handling
+    # ========================================================
 
     except Exception as e:
+
         import traceback
+
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 
+# ============================================================
+# Run Application
+# ============================================================
 
 if __name__ == "__main__":
+
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True
+    )

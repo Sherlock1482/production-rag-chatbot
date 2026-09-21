@@ -1,10 +1,28 @@
 import os
+
 from groq import Groq
+from langfuse import get_client
 
 
-# Create Groq client
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# ============================================================
+# Groq Client
+# ============================================================
 
+client = Groq(
+    api_key=os.getenv("GROQ_API_KEY")
+)
+
+
+# ============================================================
+# Langfuse
+# ============================================================
+
+langfuse = get_client()
+
+
+# ============================================================
+# Input Guardrail
+# ============================================================
 
 def check_input_guardrail(query: str) -> bool:
     """
@@ -42,22 +60,69 @@ or
 BLOCK
 """
 
-    response = client.chat.completions.create(
-        model="allam-2-7b",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
+    # ========================================================
+    # Langfuse Observation
+    # ========================================================
+
+    with langfuse.start_as_current_observation(
+        as_type="generation",
+        name="input-guardrail",
+        input={
+            "query": query
+        },
+        model="allam-2-7b"
+    ) as guardrail_trace:
+
+        # ====================================================
+        # Call Groq classifier
+        # ====================================================
+
+        response = client.chat.completions.create(
+            model="allam-2-7b",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0
+        )
+
+        # ====================================================
+        # Get classification
+        # ====================================================
+
+        result = (
+            response
+            .choices[0]
+            .message
+            .content
+            .strip()
+            .upper()
+        )
+
+        allowed = result == "ALLOW"
+
+        # ====================================================
+        # Record result in Langfuse
+        # ====================================================
+
+        guardrail_trace.update(
+            output={
+                "classification": result,
+                "allowed": allowed
             }
-        ],
-        temperature=0
-    )
+        )
 
-    result = response.choices[0].message.content.strip().upper()
+        return allowed
 
-    return result == "ALLOW"
+
+# ============================================================
+# Direct Test
+# ============================================================
 
 if __name__ == "__main__":
+
     test_queries = [
         "Find candidates with Python experience",
         "Which candidate has FastAPI experience?",
@@ -66,7 +131,15 @@ if __name__ == "__main__":
     ]
 
     for query in test_queries:
-        result = check_input_guardrail(query)
 
-        print(f"\nQuery: {query}")
-        print(f"Allowed: {result}")
+        result = check_input_guardrail(
+            query
+        )
+
+        print(
+            f"\nQuery: {query}"
+        )
+
+        print(
+            f"Allowed: {result}"
+        )

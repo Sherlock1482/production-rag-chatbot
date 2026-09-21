@@ -3,14 +3,39 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from groq import Groq
+from langfuse import get_client
 
 
+# ============================================================
 # Load .env from the project root
+# ============================================================
+
 BASE_DIR = Path(__file__).resolve().parents[2]
-load_dotenv(BASE_DIR / ".env")
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+load_dotenv(
+    BASE_DIR / ".env"
+)
 
+
+# ============================================================
+# Groq Client
+# ============================================================
+
+client = Groq(
+    api_key=os.getenv("GROQ_API_KEY")
+)
+
+
+# ============================================================
+# Langfuse
+# ============================================================
+
+langfuse = get_client()
+
+
+# ============================================================
+# Output Guardrail
+# ============================================================
 
 def check_output_guardrail(
     answer: str,
@@ -26,22 +51,66 @@ def check_output_guardrail(
         False -> answer contains unsupported information
     """
 
-    # Allow either Qdrant evidence OR MCP evidence
-    if not answer:
-        return False
+    # ========================================================
+    # Langfuse Observation
+    # ========================================================
 
-    if not relevant_docs and not mcp_context:
-        return False
+    with langfuse.start_as_current_observation(
+        as_type="generation",
+        name="output-guardrail",
+        input={
+            "answer": answer,
+            "documents_received": len(
+                relevant_docs
+            ),
+            "has_mcp_context": bool(
+                mcp_context
+            )
+        },
+        model=os.getenv("GROQ_MODEL")
+    ) as guardrail_trace:
 
-    # Qdrant document context
-    document_context = "\n\n".join(
-        doc.get("text", "")
-        for doc in relevant_docs
-        if doc.get("text")
-    )
+        # ----------------------------------------------------
+        # Basic validation
+        # ----------------------------------------------------
 
-    # Combine Qdrant + MCP evidence
-    context = f"""
+        if not answer:
+
+            guardrail_trace.update(
+                output={
+                    "allowed": False,
+                    "reason": "Empty answer"
+                }
+            )
+
+            return False
+
+        if not relevant_docs and not mcp_context:
+
+            guardrail_trace.update(
+                output={
+                    "allowed": False,
+                    "reason": "No supporting evidence"
+                }
+            )
+
+            return False
+
+        # ----------------------------------------------------
+        # Qdrant document context
+        # ----------------------------------------------------
+
+        document_context = "\n\n".join(
+            doc.get("text", "")
+            for doc in relevant_docs
+            if doc.get("text")
+        )
+
+        # ----------------------------------------------------
+        # Combine Qdrant + MCP evidence
+        # ----------------------------------------------------
+
+        context = f"""
 Retrieved TA Documents:
 --------------------
 {document_context}
@@ -53,7 +122,11 @@ MCP Interview Data:
 --------------------
 """
 
-    prompt = f"""
+        # ----------------------------------------------------
+        # Output validation prompt
+        # ----------------------------------------------------
+
+        prompt = f"""
 You are an output safety checker for a Talent Acquisition RAG system.
 
 Your job is to determine whether the generated answer is supported
@@ -91,17 +164,41 @@ Rules:
    BLOCK
 """
 
-    response = client.chat.completions.create(
-        model=os.getenv("GROQ_MODEL"),
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
+        # ====================================================
+        # Groq safety classification
+        # ====================================================
+
+        response = client.chat.completions.create(
+            model=os.getenv("GROQ_MODEL"),
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0
+        )
+
+        result = (
+            response
+            .choices[0]
+            .message
+            .content
+            .strip()
+            .upper()
+        )
+
+        allowed = result == "ALLOW"
+
+        # ====================================================
+        # Record result in Langfuse
+        # ====================================================
+
+        guardrail_trace.update(
+            output={
+                "classification": result,
+                "allowed": allowed
             }
-        ],
-        temperature=0
-    )
+        )
 
-    result = response.choices[0].message.content.strip().upper()
-
-    return result == "ALLOW"
+        return allowed
