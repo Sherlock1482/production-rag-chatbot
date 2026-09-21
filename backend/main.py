@@ -3,6 +3,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import shutil
+from fastapi import UploadFile, File
+from typing import List
+
+from utils.parser import parse_ta_document
+
 import sys
 from pathlib import Path
 from guardrails.output_guardrail import check_output_guardrail
@@ -16,6 +22,8 @@ from groq import Groq
 from utils.retriever import search_and_rerank
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from utils.indexer import index_ta_chunks
 
 app = FastAPI(title="TA RAG Chatbot API", version="1.0")
 
@@ -66,6 +74,41 @@ async def call_interview_mcp(candidate_name: str = ""):
 @app.get("/")
 def health_check():
     return {"status": "healthy", "domain": "Talent Acquisition (TA)"}
+
+@app.post("/upload")
+async def upload_documents(files: List[UploadFile] = File(...)):
+
+    upload_dir = Path("data/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+
+    for file in files:
+
+        file_path = upload_dir / file.filename
+
+        # 1. Save uploaded file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # 2. Parse document
+        extracted_chunks = parse_ta_document(str(file_path))
+
+        # 3. Index chunks into Qdrant
+        index_ta_chunks(
+            extracted_chunks,
+            file.filename
+        )
+
+        results.append({
+            "filename": file.filename,
+            "chunks": len(extracted_chunks)
+        })
+
+    return {
+        "message": "Files uploaded, parsed, and indexed successfully",
+        "files": results
+    }
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):

@@ -17,12 +17,56 @@ interface Message {
 
 export default function Home() {
   const [query, setQuery] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadStatus, setUploadStatus] = useState("");
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
       content: "Hello! I am your Talent Acquisition (TA) Copilot. Ask me anything about candidate resumes, job descriptions, or pipeline spreadsheets.",
     },
   ]);
+
+  const handleUpload = async () => {
+    if (selectedFiles.length === 0) {
+      setUploadStatus("Please select at least one file.");
+      return;
+    }
+
+    const formData = new FormData();
+
+    selectedFiles.forEach((file) => {
+      formData.append("files", file);
+    });
+
+    try {
+      setUploadStatus("Uploading...");
+
+      const res = await fetch("http://localhost:8000/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error("Upload failed");
+      }
+
+      const data = await res.json();
+
+      setUploadStatus(
+        `Uploaded successfully: ${data.files.join(", ")}`
+      );
+    } catch (error) {
+      setUploadStatus("Upload failed. Please check the backend.");
+    }
+  };
+
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) {
+      setSelectedFiles(Array.from(event.target.files));
+      setUploadStatus("");
+    }
+  };
   const [loading, setLoading] = useState(false);
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -80,6 +124,58 @@ export default function Home() {
           </div>
         </div>
       </header>
+
+      <div className="mb-6 rounded-lg border p-6">
+        <h2 className="mb-2 text-xl font-semibold">
+          Upload TA Documents
+        </h2>
+
+        <p className="mb-4 text-sm text-gray-600">
+          Upload resumes, job descriptions, or candidate data.
+        </p>
+
+        <input
+          type="file"
+          multiple
+          accept=".pdf,.doc,.docx,.txt,.xls,.xlsx"
+          onChange={handleFileSelect}
+          className="mb-4 block w-full"
+        />
+
+        {selectedFiles.length > 0 && (
+          <div className="mb-4">
+            <p className="font-medium">Selected files:</p>
+
+            <ul className="mt-2 list-disc pl-5 text-sm">
+              {selectedFiles.map((file, index) => (
+                <li key={index}>{file.name}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <input
+          type="file"
+          multiple
+          accept=".pdf,.doc,.docx,.txt,.xls,.xlsx"
+          onChange={handleFileSelect}
+          className="mb-4 block w-full text-sm text-slate-300"
+        />
+
+        <button
+          type="button"
+          className="rounded-lg bg-black px-4 py-2 text-white"
+          onClick={handleUpload}
+        >
+          Upload & Index
+        </button>
+
+        {uploadStatus && (
+          <p className="mt-3 text-sm">
+            {uploadStatus}
+          </p>
+        )}
+      </div>
 
       {/* Chat Messages Window */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6 max-w-4xl mx-auto w-full">

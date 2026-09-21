@@ -2,7 +2,7 @@ import os
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
-from parser import parse_ta_document
+from utils.parser import parse_ta_document
 
 
 # 1. Initialize Embedding Model (BAAI/bge-large-en-v1.5)
