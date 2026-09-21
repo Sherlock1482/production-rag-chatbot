@@ -123,7 +123,7 @@ async def chat_endpoint(request: ChatRequest):
             top_n=request.top_n
         )
 
-        if not check_evidence_guardrail(relevant_docs):
+        if not mcp_data and not check_evidence_guardrail(relevant_docs):
             return {
                 "response": (
                     "I couldn't find enough relevant information in the "
@@ -162,6 +162,9 @@ async def chat_endpoint(request: ChatRequest):
             "cite the source ID such as [1] or [2]. "
             "If the requested information is not available, clearly state that "
             "the information is missing from the database."
+            "For interview questions, give a concise answer using the candidate's "
+            "date, stage, and interviewer when available. Do not say information "
+            "is missing if it is present in the MCP data. "
         )
 
         user_prompt = (
@@ -183,7 +186,7 @@ async def chat_endpoint(request: ChatRequest):
 
         ai_response = chat_completion.choices[0].message.content
 
-        if not check_output_guardrail(ai_response, relevant_docs):
+        if not check_output_guardrail(ai_response, relevant_docs,mcp_context):
             return {
                 "response": (
                     "I couldn't verify that the generated answer is fully "
@@ -198,6 +201,8 @@ async def chat_endpoint(request: ChatRequest):
         }
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
