@@ -1,7 +1,12 @@
 import os
 import pandas as pd
 from unstructured.partition.auto import partition
+import sys
+from pathlib import Path
 
+sys.path.append(
+    str(Path(__file__).resolve().parents[1])
+)
 
 def parse_ta_document(file_path: str):
     """

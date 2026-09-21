@@ -22,7 +22,8 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "Hello! I am your Talent Acquisition (TA) Copilot. Ask me anything about candidate resumes, job descriptions, or pipeline spreadsheets.",
+      content:
+        "Hello! I am your Talent Acquisition (TA) Copilot. Ask me anything about candidate resumes, job descriptions, or pipeline spreadsheets.",
     },
   ]);
 
@@ -52,21 +53,30 @@ export default function Home() {
 
       const data = await res.json();
 
-      setUploadStatus(
-        `Uploaded successfully: ${data.files.join(", ")}`
-      );
+      const fileResults = data.files
+        .map(
+          (file: any) =>
+            `${file.filename}: ${file.status || "success"} - ${
+              file.message || "Uploaded successfully."
+            }`
+        )
+        .join("\n");
+
+      setUploadStatus(fileResults);
     } catch (error) {
       setUploadStatus("Upload failed. Please check the backend.");
     }
   };
 
-
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
     if (event.target.files) {
       setSelectedFiles(Array.from(event.target.files));
       setUploadStatus("");
     }
   };
+
   const [loading, setLoading] = useState(false);
 
   const handleSendMessage = async (e: React.FormEvent) => {
