@@ -2,7 +2,9 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from groq import Groq
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
 from langfuse import get_client
 
 
@@ -21,8 +23,9 @@ load_dotenv(
 # Groq Client
 # ============================================================
 
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
+client = ChatGroq(
+    model=os.getenv("GROQ_GUARDRAIL_MODEL", os.getenv("GROQ_MODEL", "allam-2-7b")),
+    temperature=0,
 )
 
 
@@ -168,25 +171,12 @@ Rules:
         # Groq safety classification
         # ====================================================
 
-        response = client.chat.completions.create(
-            model=os.getenv("GROQ_MODEL"),
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=0
+        guardrail_chain = (
+            ChatPromptTemplate.from_messages([("human", "{prompt}")])
+            | client
+            | StrOutputParser()
         )
-
-        result = (
-            response
-            .choices[0]
-            .message
-            .content
-            .strip()
-            .upper()
-        )
+        result = guardrail_chain.invoke({"prompt": prompt}).strip().upper()
 
         allowed = result == "ALLOW"
 

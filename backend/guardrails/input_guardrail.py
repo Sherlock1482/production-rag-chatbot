@@ -1,6 +1,7 @@
 import os
-
-from groq import Groq
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
 from langfuse import get_client
 
 
@@ -8,8 +9,9 @@ from langfuse import get_client
 # Groq Client
 # ============================================================
 
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
+client = ChatGroq(
+    model=os.getenv("GROQ_GUARDRAIL_MODEL", "allam-2-7b"),
+    temperature=0,
 )
 
 
@@ -77,29 +79,12 @@ BLOCK
         # Call Groq classifier
         # ====================================================
 
-        response = client.chat.completions.create(
-            model="allam-2-7b",
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=0
+        guardrail_chain = (
+            ChatPromptTemplate.from_messages([("human", "{prompt}")])
+            | client
+            | StrOutputParser()
         )
-
-        # ====================================================
-        # Get classification
-        # ====================================================
-
-        result = (
-            response
-            .choices[0]
-            .message
-            .content
-            .strip()
-            .upper()
-        )
+        result = guardrail_chain.invoke({"prompt": prompt}).strip().upper()
 
         allowed = result == "ALLOW"
 

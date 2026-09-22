@@ -12,7 +12,9 @@ from utils.image_processor import extract_text_from_image
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from groq import Groq
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
 from guardrails.image_guardrail import check_image_text
 from utils.parser import parse_ta_document
 from utils.retriever import search_and_rerank
@@ -62,8 +64,10 @@ app.add_middleware(
 # Groq Client
 # ============================================================
 
-groq_client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
+llm = ChatGroq(
+    model=os.getenv("GROQ_MODEL", "allam-2-7b"),
+    temperature=0.1,
+    max_tokens=1024,
 )
 
 
@@ -540,35 +544,13 @@ async def chat_endpoint(
                 model="allam-2-7b"
             ) as llm_trace:
 
-                chat_completion = (
-                    groq_client
-                    .chat
-                    .completions
-                    .create(
-                        model="allam-2-7b",
-
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": system_prompt
-                            },
-                            {
-                                "role": "user",
-                                "content": user_prompt
-                            }
-                        ],
-
-                        temperature=0.1,
-
-                        max_tokens=1024
-                    )
-                )
-
-                ai_response = (
-                    chat_completion
-                    .choices[0]
-                    .message
-                    .content
+                prompt = ChatPromptTemplate.from_messages([
+                    ("system", system_prompt),
+                    ("human", "{user_prompt}"),
+                ])
+                rag_chain = prompt | llm | StrOutputParser()
+                ai_response = rag_chain.invoke(
+                    {"user_prompt": user_prompt}
                 )
 
                 # Record LLM output in Langfuse
@@ -577,13 +559,6 @@ async def chat_endpoint(
                         "response": ai_response
                     }
                 )
-                # Extract LLM response
-                ai_response = (
-                    chat_completion
-                    .choices[0]
-                    .message
-                    .content
-                    )
 
             # =================================================
             # Step 9: Output Guardrail

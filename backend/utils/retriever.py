@@ -1,12 +1,15 @@
 import os
-from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
+from langchain_huggingface import HuggingFaceEmbeddings
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 import torch
 
 # 1. Initialize Embedding Model & Qdrant Client
-print("Loading embedding model for retrieval...")
-embedding_model = SentenceTransformer("BAAI/bge-large-en-v1.5")
+print("Loading LangChain embedding model for retrieval...")
+embedding_model = HuggingFaceEmbeddings(
+    model_name="BAAI/bge-large-en-v1.5",
+    encode_kwargs={"normalize_embeddings": True},
+)
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 client = QdrantClient(url=QDRANT_URL)
 COLLECTION_NAME = "ta_documents"
@@ -26,14 +29,13 @@ def search_and_rerank(query: str, top_k: int = 5, top_n: int = 3):
     print(f"\n--- Processing Query: '{query}' ---")
     
     # --- STEP 1: Vector Retrieval (Qdrant) ---
-    query_vector = embedding_model.encode(query, normalize_embeddings=True).tolist()
-    
+    query_vector = embedding_model.embed_query(query)
     search_results = client.query_points(
         collection_name=COLLECTION_NAME,
         query=query_vector,
-        limit=top_k
+        limit=top_k,
     ).points
-    
+
     if not search_results:
         print("No matching documents found in Qdrant.")
         return []
@@ -44,7 +46,7 @@ def search_and_rerank(query: str, top_k: int = 5, top_n: int = 3):
         retrieved_docs.append({
             "text": result.payload.get("text"),
             "source": result.payload.get("source"),
-            "initial_score": result.score
+            "initial_score": result.score,
         })
     
     print(f"Retrieved {len(retrieved_docs)} raw chunks from Qdrant.")
