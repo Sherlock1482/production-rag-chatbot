@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import {
   ArrowUpRight,
   Bot,
@@ -10,11 +10,11 @@ import {
   FileText,
   FileUp,
   Loader2,
+  MessageSquare,
   Paperclip,
   Plus,
   Send,
   Sparkles,
-  Trash2,
   UploadCloud,
   User,
   X,
@@ -24,6 +24,12 @@ interface Source {
   id: number;
   source: string;
   text: string;
+}
+
+interface ChatSession {
+  id: string;
+  messages: Message[];
+  updatedAt: number;
 }
 
 interface Message {
@@ -39,6 +45,20 @@ interface UploadResult {
 }
 
 const acceptedFileTypes = ".pdf,.doc,.docx,.txt,.xls,.xlsx,.png,.jpg,.jpeg,.webp";
+const chatHistoryKey = "ta-rag-chat-history";
+const initialMessage: Message = {
+  role: "assistant",
+  content:
+    "Hello! I’m your Talent Acquisition copilot. Ask me about candidates, skills, job requirements, or interview schedules.",
+};
+
+function createChatSession(): ChatSession {
+  return { id: crypto.randomUUID(), messages: [initialMessage], updatedAt: Date.now() };
+}
+
+function getChatTitle(messages: Message[]) {
+  return messages.find((message) => message.role === "user")?.content || "New conversation";
+}
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -52,14 +72,89 @@ export default function Home() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content:
-        "Hello! I’m your Talent Acquisition copilot. Ask me about candidates, skills, job requirements, or interview schedules.",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([initialMessage]);
+  const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
+  const [activeChatId, setActiveChatId] = useState("");
+  const [historyReady, setHistoryReady] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      const storedHistory = sessionStorage.getItem(chatHistoryKey);
+      const parsedHistory = storedHistory ? JSON.parse(storedHistory) as ChatSession[] : [];
+      const sessions = parsedHistory.length > 0 ? parsedHistory : [createChatSession()];
+      startTransition(() => {
+        setChatHistory(sessions);
+        setActiveChatId(sessions[0].id);
+        setMessages(sessions[0].messages);
+      });
+    } catch {
+      const session = createChatSession();
+      startTransition(() => {
+        setChatHistory([session]);
+        setActiveChatId(session.id);
+        setMessages(session.messages);
+      });
+    } finally {
+      setHistoryReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (historyReady && chatHistory.length > 0) {
+      sessionStorage.setItem(chatHistoryKey, JSON.stringify(chatHistory));
+    }
+  }, [chatHistory, historyReady]);
+
+  const updateMessages = (updater: Message[] | ((current: Message[]) => Message[])) => {
+    setMessages((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      setChatHistory((history) => history.map((chat) => (
+        chat.id === activeChatId ? { ...chat, messages: next, updatedAt: Date.now() } : chat
+      )));
+      return next;
+    });
+  };
+
+  const createNewChat = () => {
+    if (loading) return;
+    const session = createChatSession();
+    setChatHistory((current) => [session, ...current]);
+    setActiveChatId(session.id);
+    setMessages(session.messages);
+    setQuery("");
+  };
+
+  const selectChat = (session: ChatSession) => {
+    if (loading) return;
+    setActiveChatId(session.id);
+    setMessages(session.messages);
+    setQuery("");
+  };
+
+  const deleteChat = (chatId: string) => {
+    if (loading) return;
+
+    setChatHistory((current) => {
+      const remainingChats = current.filter((chat) => chat.id !== chatId);
+
+      if (remainingChats.length === 0) {
+        const replacementChat = createChatSession();
+        setActiveChatId(replacementChat.id);
+        setMessages(replacementChat.messages);
+        return [replacementChat];
+      }
+
+      if (chatId === activeChatId) {
+        const nextChat = remainingChats[0];
+        setActiveChatId(nextChat.id);
+        setMessages(nextChat.messages);
+      }
+
+      return remainingChats;
+    });
+    setQuery("");
+  };
 
   const addFiles = (files: File[]) => {
     setSelectedFiles((current) => {
@@ -120,7 +215,11 @@ export default function Home() {
 
     const userMessage = query.trim();
     setQuery("");
-    setMessages((current) => [...current, { role: "user", content: userMessage }]);
+    updateMessages((current) => [
+      ...current,
+      { role: "user", content: userMessage },
+      { role: "assistant", content: "" },
+    ]);
     setLoading(true);
 
     try {
@@ -130,19 +229,99 @@ export default function Home() {
         body: JSON.stringify({ query: userMessage, top_k: 5, top_n: 3 }),
       });
       if (!response.ok) throw new Error("Chat request failed");
-      const data = await response.json();
-      setMessages((current) => [
-        ...current,
-        { role: "assistant", content: data.response, sources: data.sources },
-      ]);
+
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const data = await response.json();
+        updateMessages((current) => {
+          const next = [...current];
+          const assistantIndex = next.length - 1;
+          next[assistantIndex] = {
+            role: "assistant",
+            content: data.response,
+            sources: data.sources,
+          };
+          return next;
+        });
+      } else {
+        if (!response.body) throw new Error("Chat response has no body");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let streamedResponse = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          if (!chunk) continue;
+          streamedResponse += chunk;
+
+          updateMessages((current) => {
+            const next = [...current];
+            const assistantIndex = next.length - 1;
+            next[assistantIndex] = {
+              ...next[assistantIndex],
+              content: streamedResponse,
+            };
+            return next;
+          });
+        }
+
+        const remainder = decoder.decode();
+        if (remainder) {
+          streamedResponse += remainder;
+          updateMessages((current) => {
+            const next = [...current];
+            const assistantIndex = next.length - 1;
+            next[assistantIndex] = {
+              ...next[assistantIndex],
+              content: streamedResponse,
+            };
+            return next;
+          });
+        }
+
+        const citationMarker = "\nSources:\n";
+        const citationIndex = streamedResponse.indexOf(citationMarker);
+        const answer = citationIndex >= 0
+          ? streamedResponse.slice(0, citationIndex).trimEnd()
+          : streamedResponse;
+        const citations = citationIndex >= 0
+          ? streamedResponse
+              .slice(citationIndex + citationMarker.length)
+              .split("\n")
+              .map((line) => line.match(/^\[(\d+)\]\s+(.+)$/))
+              .filter((match): match is RegExpMatchArray => match !== null)
+              .map(([, id, source]) => ({
+                id: Number(id),
+                source,
+                text: "",
+              }))
+          : [];
+
+        updateMessages((current) => {
+          const next = [...current];
+          const assistantIndex = next.length - 1;
+          next[assistantIndex] = {
+            ...next[assistantIndex],
+            content: answer,
+            sources: citations,
+          };
+          return next;
+        });
+      }
     } catch {
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
+      updateMessages((current) => {
+        const next = [...current];
+        const assistantIndex = next.length - 1;
+        next[assistantIndex] = {
+          ...next[assistantIndex],
           content: "I couldn’t connect to the backend. Make sure FastAPI is running on port 8000.",
-        },
-      ]);
+        };
+        return next;
+      });
     } finally {
       setLoading(false);
     }
@@ -223,6 +402,46 @@ export default function Home() {
           )}
 
           <div className="privacy-note"><Check size={14} /><span>Documents stay in your local workspace</span></div>
+
+          <div className="history-panel">
+            <div className="history-heading">
+              <span><MessageSquare size={14} /> Chat history</span>
+              <span>{chatHistory.length}</span>
+            </div>
+            <div className="history-list">
+              {chatHistory.map((chat) => (
+                <button
+                  type="button"
+                  className={`history-item ${chat.id === activeChatId ? "active" : ""}`}
+                  key={chat.id}
+                  onClick={() => selectChat(chat)}
+                  title={getChatTitle(chat.messages)}
+                >
+                  <MessageSquare size={14} />
+                  <span>{getChatTitle(chat.messages)}</span>
+                  <span
+                    className="history-delete"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Delete ${getChatTitle(chat.messages)}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteChat(chat.id);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        deleteChat(chat.id);
+                      }
+                    }}
+                  >
+                    <X size={13} />
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
         </aside>
 
         <section className="chat-panel">
@@ -231,7 +450,7 @@ export default function Home() {
               <div className="assistant-avatar"><Bot size={20} /></div>
               <div><h2>Recruiting assistant</h2><p>Grounded answers from your indexed documents</p></div>
             </div>
-            <button type="button" className="new-chat-button" onClick={() => setMessages([messages[0]])}><Trash2 size={15} /> Clear chat</button>
+            <button type="button" className="new-chat-button" onClick={createNewChat}><Plus size={15} /> New chat</button>
           </div>
 
           <div className="conversation">
@@ -252,7 +471,11 @@ export default function Home() {
                   <div className="message-avatar">{message.role === "user" ? <User size={15} /> : <Bot size={15} />}</div>
                   <div className="message-content">
                     <span className="message-label">{message.role === "user" ? "You" : "Copilot"}</span>
-                    <p>{message.content}</p>
+                    <p>
+                      {message.content || (loading && message.role === "assistant" && index === messages.length - 1 ? (
+                        <><Loader2 size={15} className="spin" /> Searching your knowledge base...</>
+                      ) : null)}
+                    </p>
                     {message.sources && message.sources.length > 0 && (
                       <div className="sources-block">
                         <span>Sources used</span>
@@ -264,7 +487,6 @@ export default function Home() {
                   </div>
                 </div>
               ))}
-              {loading && <div className="message assistant"><div className="message-avatar"><Bot size={15} /></div><div className="message-content loading-message"><span className="message-label">Copilot</span><p><Loader2 size={15} className="spin" /> Searching your knowledge base...</p></div></div>}
             </div>
           </div>
 
