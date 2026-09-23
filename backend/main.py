@@ -170,7 +170,7 @@ async def upload_documents(
     files: List[UploadFile] = File(...)
 ):
 
-    upload_dir = Path(__file__).resolve().parent / "data" / "uploads"
+    upload_dir = Path("data/uploads")
 
     upload_dir.mkdir(
         parents=True,
@@ -185,13 +185,7 @@ async def upload_documents(
         # Save uploaded file
         # ----------------------------------------------------
 
-        file_path = upload_dir / Path(file.filename).name
-
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(
-                file.file,
-                buffer
-            )
+        file_path = upload_dir / file.filename
 
         # ----------------------------------------------------
         # Handle uploaded file
@@ -205,6 +199,13 @@ async def upload_documents(
         }
 
         if file_path.suffix.lower() in image_extensions:
+
+            # Save the image
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(
+                    file.file,
+                    buffer
+                )
 
             # ------------------------------------------------
             # Extract text using PaddleOCR
@@ -333,58 +334,44 @@ async def generate_stream(rag_chain, user_prompt, request_query, relevant_docs, 
         ):
             print("WARNING: Output guardrail blocked the response.")
 
-        citation_lines = ["", "Sources:"]
-        seen_sources = set()
-
-        for idx, doc in enumerate(relevant_docs, start=1):
-            source_name = doc.get("source") or "Unknown source"
-            source_key = source_name.strip().casefold()
-            if source_key in seen_sources:
-                continue
-            seen_sources.add(source_key)
-            citation_lines.append(
-                f"[{len(seen_sources)}] {source_name}"
-            )
+        citation_lines = ["", "Sources used"]
 
         if mcp_context:
+
             citation_lines.append(
-                "[Live] MCP interview data"
+                "[Live] Google Calendar via MCP"
             )
 
-        if len(citation_lines) > 2:
+        else:
+
+            seen_sources = set()
+
+            for doc in relevant_docs:
+
+                source_name = doc.get("source") or "Unknown source"
+                source_key = source_name.strip().casefold()
+
+                if source_key in seen_sources:
+                    continue
+
+                seen_sources.add(source_key)
+
+                citation_lines.append(
+                    f"[{len(seen_sources)}] {source_name}"
+                )
+
+        if len(citation_lines) > 1:
             yield "\n".join(citation_lines) + "\n"
+
+
+        # -------------------------------------------------
+        # Return sources
+        # -------------------------------------------------
 
     except Exception as e:
         print(f"Streaming error: {e}")
         yield "\n[Error generating response]"
-    """
-    Generate the LLM response chunk-by-chunk.
 
-    The complete response is also collected so that
-    the existing output guardrail can check it after
-    generation finishes.
-    """
-
-    full_response = ""
-
-    try:
-
-        # ----------------------------------------------------
-        # Stream LLM response
-        # ----------------------------------------------------
-
-        for chunk in rag_chain.stream(
-            {
-                "user_prompt": user_prompt
-            }
-        ):
-
-            if chunk:
-
-                full_response += chunk
-
-                # Send chunk immediately
-                yield chunk
 
         # ----------------------------------------------------
         # Output Guardrail
@@ -480,38 +467,42 @@ async def chat_endpoint(
                 for keyword in interview_keywords
             ):
 
-                candidate_names = [
-                    "priya",
-                    "arjun",
-                    "jane"
-                ]
+                # -------------------------------------------------
+                # If recruiter asks for all interviews
+                # -------------------------------------------------
 
-                # ---------------------------------------------
-                # Check for a specific candidate
-                # ---------------------------------------------
+                if "all" in query_lower:
 
-                for name in candidate_names:
+                    mcp_data = await call_interview_mcp("")
 
-                    if name in query_lower:
+                # -------------------------------------------------
+                # Otherwise, try to extract candidate name
+                # -------------------------------------------------
+
+                else:
+
+                    candidate_name = ""
+
+                    words = request.query.split()
+
+                    for i in range(len(words) - 1):
+
+                        first = words[i].strip("?,.!")
+
+                        last = words[i + 1].strip("?,.!")
+
+                        if (
+                            first.istitle()
+                            and last.istitle()
+                        ):
+                            candidate_name = f"{first} {last}"
+                            break
+
+                    if candidate_name:
 
                         mcp_data = await call_interview_mcp(
-                            name
+                            candidate_name
                         )
-
-                        break
-
-                # ---------------------------------------------
-                # Check if recruiter wants all interviews
-                # ---------------------------------------------
-
-                if (
-                    mcp_data is None
-                    and "all" in query_lower
-                ):
-
-                    mcp_data = await call_interview_mcp(
-                        ""
-                    )
 
             # =================================================
             # Build MCP Context

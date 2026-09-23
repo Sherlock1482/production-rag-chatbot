@@ -5,3 +5,6 @@ __pycache__/
 .next/
 node_modules/
 "@ | Set-Content .gitignore
+
+credentials.json
+token.json

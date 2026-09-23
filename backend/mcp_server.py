@@ -1,67 +1,52 @@
-import sqlite3
-import os
-from pathlib import Path
-
+from google_calendar import get_upcoming_events
 from mcp.server.fastmcp import FastMCP
 
 
 mcp = FastMCP("TA Interview Server")
 
 
-def query_interview_schedule(candidate_name: str = ""):
-    """
-    Query the TA interview database.
-    """
-
-
-    db_path = Path(__file__).resolve().parent.parent / "ta_interviews.db"
-
-    if not os.path.exists(db_path):
-        return "Interview database not found."
-
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    if candidate_name:
-        cursor.execute(
-            """
-            SELECT *
-            FROM interviews
-            WHERE candidate_name LIKE ?
-            """,
-            (f"%{candidate_name}%",)
-        )
-    else:
-        cursor.execute("SELECT * FROM interviews")
-
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        return f"No interview records found for '{candidate_name}'."
-
-    results = []
-
-    for row in rows:
-        results.append({
-            "candidate": row[0],
-            "role": row[1],
-            "stage": row[2],
-            "date": row[3],
-            "interviewer": row[4]
-        })
-
-    return results
-
-
 @mcp.tool()
 def get_interview_schedule(candidate_name: str = ""):
     """
-    Get interview schedule and current interview stage
-    for one candidate or all candidates.
+    Get interview schedule from Google Calendar
+    for one candidate or all upcoming interviews.
     """
 
-    return query_interview_schedule(candidate_name)
+    events = get_upcoming_events()
+
+    results = []
+
+    for event in events:
+
+        summary = event.get("summary", "")
+
+        # If candidate name is provided,
+        # only return matching events.
+        if candidate_name:
+            if candidate_name.lower() not in summary.lower():
+                continue
+
+        start = event["start"].get(
+            "dateTime",
+            event["start"].get("date")
+        )
+
+        results.append({
+            "candidate": candidate_name if candidate_name else summary,
+            "interview": summary,
+            "start_time": start,
+            "description": event.get("description", ""),
+            "location": event.get("location", ""),
+            "meeting_link": event.get("hangoutLink", "")
+        })
+
+    if not results:
+        return {
+            "candidate": candidate_name,
+            "message": "No upcoming interview found."
+        }
+
+    return results
 
 
 if __name__ == "__main__":
