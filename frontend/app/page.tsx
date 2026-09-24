@@ -6,12 +6,10 @@ import {
   Bot,
   Check,
   CircleAlert,
-  FileArchive,
   FileText,
   FileUp,
   Loader2,
   MessageSquare,
-  Paperclip,
   Plus,
   Send,
   Sparkles,
@@ -68,6 +66,7 @@ function formatFileSize(bytes: number) {
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const conversationEndRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
@@ -105,6 +104,10 @@ export default function Home() {
       sessionStorage.setItem(chatHistoryKey, JSON.stringify(chatHistory));
     }
   }, [chatHistory, historyReady]);
+
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, activeChatId]);
 
   const updateMessages = (updater: Message[] | ((current: Message[]) => Message[])) => {
     setMessages((current) => {
@@ -205,7 +208,7 @@ export default function Home() {
       setSelectedFiles([]);
     } catch {
       setUploadStatus("error");
-      setUploadMessage("Upload failed. Check that the FastAPI backend is running.");
+      setUploadMessage("Upload failed. Check that the backend service is running.");
     }
   };
 
@@ -318,7 +321,7 @@ export default function Home() {
         const assistantIndex = next.length - 1;
         next[assistantIndex] = {
           ...next[assistantIndex],
-          content: "I couldn’t connect to the backend. Make sure FastAPI is running on port 8000.",
+          content: "I couldn’t connect to the backend service. Make sure it is running on port 8000.",
         };
         return next;
       });
@@ -337,21 +340,13 @@ export default function Home() {
             <p className="brand-product">RAG Copilot</p>
           </div>
         </div>
-        <div className="topbar-meta">
-          <span className="status-dot" />
-          <span>Knowledge workspace</span>
-          <span className="topbar-divider" />
-          <span className="engine-label">FastAPI <b>·</b> Qdrant <b>·</b> Groq</span>
-        </div>
       </header>
 
       <div className="workspace">
         <aside className="library-panel">
-          <div className="eyebrow"><FileArchive size={14} /> Knowledge base</div>
           <div className="panel-heading">
             <div>
               <h1>Document intake</h1>
-              <p>Build the source library your copilot searches.</p>
             </div>
             <span className="count-badge">{selectedFiles.length}</span>
           </div>
@@ -406,7 +401,12 @@ export default function Home() {
           <div className="history-panel">
             <div className="history-heading">
               <span><MessageSquare size={14} /> Chat history</span>
-              <span>{chatHistory.length}</span>
+              <div className="history-actions">
+                <span>{chatHistory.length}</span>
+                <button type="button" className="new-chat-button sidebar-new-chat-button" onClick={createNewChat}>
+                  <Plus size={15} /> New chat
+                </button>
+              </div>
             </div>
             <div className="history-list">
               {chatHistory.map((chat) => (
@@ -445,14 +445,6 @@ export default function Home() {
         </aside>
 
         <section className="chat-panel">
-          <div className="chat-header">
-            <div className="chat-title-wrap">
-              <div className="assistant-avatar"><Bot size={20} /></div>
-              <div><h2>Recruiting assistant</h2><p>Grounded answers from your indexed documents</p></div>
-            </div>
-            <button type="button" className="new-chat-button" onClick={createNewChat}><Plus size={15} /> New chat</button>
-          </div>
-
           <div className="conversation">
             <div className="conversation-intro">
               <span className="intro-kicker">Ready when you are</span>
@@ -487,12 +479,12 @@ export default function Home() {
                   </div>
                 </div>
               ))}
+              <div ref={conversationEndRef} aria-hidden="true" />
             </div>
           </div>
 
           <div className="composer-wrap">
             <form className="composer" onSubmit={handleSendMessage}>
-              <Paperclip size={18} className="composer-icon" />
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask about candidates, skills, roles, or interviews..." aria-label="Ask the recruiting assistant" />
               <button type="submit" className="send-button" disabled={loading || !query.trim()} aria-label="Send message"><Send size={17} /></button>
             </form>
