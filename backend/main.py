@@ -44,6 +44,11 @@ from mcp.client.stdio import stdio_client
 
 from langfuse import get_client
 
+from utils.scheduling_request import analyze_scheduling_request
+from utils.schedule_details import get_missing_schedule_details
+from utils.datetime_normalizer import normalize_datetime
+from utils.schedule_validator import validate_schedule
+
 
 # ============================================================
 # Langfuse
@@ -186,6 +191,210 @@ async def call_interview_mcp(candidate_name: str = ""):
 
                 return mcp_data
 
+
+async def call_availability_mcp(start_time: str, end_time: str):
+    """
+    Connect to the TA MCP server and check Google Calendar availability.
+    """
+
+    with langfuse.start_as_current_observation(
+        as_type="span",
+        name="mcp-availability",
+        input={
+            "start_time": start_time,
+            "end_time": end_time,
+            "tool": "check_calendar_availability_tool"
+        }
+    ) as mcp_trace:
+
+        server_params = StdioServerParameters(
+            command=sys.executable,
+            args=[str(MCP_SERVER_PATH)],
+        )
+
+        async with stdio_client(
+            server_params
+        ) as (read, write):
+
+            async with ClientSession(
+                read,
+                write
+            ) as session:
+
+                await session.initialize()
+
+                result = await session.call_tool(
+                    "check_calendar_availability_tool",
+                    arguments={
+                        "start_time": start_time,
+                        "end_time": end_time
+                    }
+                )
+
+                if result.content:
+
+                    mcp_text = result.content[0].text
+
+                    try:
+                        mcp_data = json.loads(mcp_text)
+
+                    except json.JSONDecodeError:
+
+                        mcp_data = {
+                            "available": False,
+                            "error": "Invalid MCP response."
+                        }
+
+                else:
+
+                    mcp_data = {
+                        "available": False,
+                        "error": "No MCP response received."
+                    }
+
+                mcp_trace.update(
+                    output=mcp_data
+                )
+
+                print(
+                    "\n========== CLEAN MCP AVAILABILITY DATA =========="
+                )
+                print(mcp_data)
+                print(
+                    "=================================================\n"
+                )
+
+                return mcp_data
+
+async def call_create_interview_mcp(
+    candidate_name: str,
+    start_time: str,
+    end_time: str,
+    description: str = "",
+    location: str = "",
+):
+    """Call MCP to create a Google Calendar interview event."""
+
+    try:
+        server_params = StdioServerParameters(
+            command=sys.executable,
+            args=[str(MCP_SERVER_PATH)],
+        )
+
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+
+                result = await session.call_tool(
+                    "create_interview_event",
+                    arguments={
+                        "candidate_name": candidate_name,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "description": description,
+                        "location": location,
+                    },
+                )
+
+            print("\n========== MCP CREATE EVENT ==========")
+            print(result)
+            print("======================================\n")
+
+            if result.content:
+                return json.loads(result.content[0].text)
+
+            return {
+                "created": False,
+                "error": "MCP returned no response."
+            }
+
+    except Exception as e:
+        print(f"MCP create interview error: {e}")
+
+        return {
+            "created": False,
+            "error": str(e)
+        }
+
+async def call_alternative_slots_mcp(
+    start_time: str,
+    duration_minutes: int = 60,
+    number_of_slots: int = 3
+):
+    """
+    Ask MCP for alternative interview slots.
+    """
+
+    with langfuse.start_as_current_observation(
+        as_type="span",
+        name="mcp-alternative-slots",
+        input={
+            "start_time": start_time,
+            "duration_minutes": duration_minutes,
+            "number_of_slots": number_of_slots,
+            "tool": "find_available_interview_slots"
+        }
+    ) as mcp_trace:
+
+        server_params = StdioServerParameters(
+            command=sys.executable,
+            args=[str(MCP_SERVER_PATH)],
+        )
+
+        async with stdio_client(
+            server_params
+        ) as (read, write):
+
+            async with ClientSession(
+                read,
+                write
+            ) as session:
+
+                await session.initialize()
+
+                result = await session.call_tool(
+                    "find_available_interview_slots",
+                    arguments={
+                        "start_time": start_time,
+                        "duration_minutes": duration_minutes,
+                        "number_of_slots": number_of_slots
+                    }
+                )
+
+                if result.content:
+
+                    mcp_text = result.content[0].text
+
+                    try:
+                        mcp_data = json.loads(mcp_text)
+
+                    except json.JSONDecodeError:
+
+                        mcp_data = {
+                            "available_slots": [],
+                            "error": "Invalid MCP response."
+                        }
+
+                else:
+
+                    mcp_data = {
+                        "available_slots": [],
+                        "error": "No MCP response received."
+                    }
+
+                mcp_trace.update(
+                    output=mcp_data
+                )
+
+                print(
+                    "\n========== CLEAN MCP ALTERNATIVE SLOTS =========="
+                )
+                print(mcp_data)
+                print(
+                    "==================================================\n"
+                )
+
+                return mcp_data
 
 # ============================================================
 # Health Check
@@ -530,6 +739,122 @@ async def chat_endpoint(
             # =================================================
 
             query_lower = request.query.lower()
+            # =================================================
+            # Scheduling Request Analysis
+            # =================================================
+
+            scheduling_request = analyze_scheduling_request(
+                request.query
+            )
+
+            print("\n========== SCHEDULING ANALYSIS ==========")
+            print(scheduling_request)
+            print("=========================================\n")
+
+            if scheduling_request.get("intent") == "schedule_interview":
+
+                schedule_details = get_missing_schedule_details(
+                    request.query
+                )
+
+                if schedule_details.get("complete"):
+
+                    normalized_datetime = normalize_datetime(
+                        schedule_details["details"]
+                    )
+
+                    print("\n========== NORMALIZED DATETIME ==========")
+                    print(normalized_datetime)
+                    print("=========================================\n")
+
+                    start_time = normalized_datetime["start_datetime"].isoformat()
+                    end_time = normalized_datetime["end_datetime"].isoformat()
+
+                    availability_result = await call_availability_mcp(
+                        start_time,
+                        end_time
+                    )
+
+                    print("\n========== AVAILABILITY RESULT ==========")
+                    print(availability_result)
+                    print("=========================================\n")
+
+                    # -------------------------------------------------
+                    # Return scheduling result directly
+                    # Do not continue into RAG flow
+                    # -------------------------------------------------
+
+                    candidate_name = scheduling_request["candidate"]["candidate_name"]
+
+                    if availability_result.get("available"):
+
+                        create_result = await call_create_interview_mcp(
+                            candidate_name=candidate_name,
+                            start_time=start_time,
+                            end_time=end_time,
+                            description="Technical Interview",
+                        )
+
+                        print("\n========== CREATE RESULT ==========")
+                        print(create_result)
+                        print("===================================\n")
+
+                        if create_result.get("created"):
+
+                            start_display = normalized_datetime["start_datetime"].strftime(
+                                "%A, %B %d, %Y at %I:%M %p UTC"
+                            )
+
+                            response_text = (
+                                f"Interview for {candidate_name} has been scheduled successfully "
+                                f"for {start_display}. "
+                            )
+
+                            if create_result.get("calendar_link"):
+                                response_text += (
+                                    f"Calendar event: {create_result['calendar_link']}"
+                                )
+
+                        else:
+
+                            response_text = (
+                                f"The time was available, but I could not create the "
+                                f"calendar event. Error: {create_result.get('error', 'Unknown error')}"
+                            )
+
+                        return StreamingResponse(
+                            iter([response_text]),
+                            media_type="text/plain"
+                        )
+
+                    conflicts = availability_result.get("conflicts", [])
+                    conflict_text = "The requested time is unavailable."
+
+                    if conflicts:
+                        conflict_text += " Conflicting event(s): " + "; ".join(
+                            f"{conflict.get('summary', 'Calendar event')} "
+                            f"({conflict.get('start', 'unknown start')})"
+                            for conflict in conflicts
+                        ) + "."
+
+                    return StreamingResponse(
+                        iter([conflict_text]),
+                        media_type="text/plain"
+                    )
+
+                else:
+
+                    print("\n========== SCHEDULE DETAILS ==========")
+                    print(schedule_details)
+                    print("======================================\n")
+
+                    return {
+                        "response": (
+                            "Please provide the interview date and time."
+                        ),
+                        "sources": []
+                    }
+                            
 
             mcp_data = None
             mcp_context = ""
@@ -546,9 +871,9 @@ async def chat_endpoint(
             # Check if query is interview-related
             # -------------------------------------------------
 
-            if any(
-                keyword in query_lower
-                for keyword in interview_keywords
+            if (
+                scheduling_request.get("intent") != "schedule_interview"
+                and any(keyword in query_lower for keyword in interview_keywords)
             ):
 
                 # -------------------------------------------------

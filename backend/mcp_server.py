@@ -1,6 +1,11 @@
 import re
 
-from google_calendar import get_upcoming_events
+from google_calendar import (
+    get_upcoming_events,
+    check_calendar_availability,
+    find_available_slots,
+    create_calendar_event,
+)
 from mcp.server.fastmcp import FastMCP
 
 
@@ -97,7 +102,51 @@ def get_interview_schedule(candidate_name: str = ""):
         "found": True,
         "results": results
     }
+@mcp.tool()
+def check_calendar_availability_tool(
+    start_time: str,
+    end_time: str,
+):
+    """
+    Check whether a requested interview time is available
+    on the recruiter's Google Calendar.
+    """
 
+    return check_calendar_availability(
+        start_time,
+        end_time,
+    )
+@mcp.tool()
+def find_available_interview_slots(
+    start_time: str,
+    duration_minutes: int = 60,
+    number_of_slots: int = 3,
+):
+    """
+    Find available interview slots after the requested start time.
+    """
+
+    return find_available_slots(
+        start_time=start_time,
+        duration_minutes=duration_minutes,
+        number_of_slots=number_of_slots,
+    )
+@mcp.tool()
+def create_interview_event(
+    candidate_name: str,
+    start_time: str,
+    end_time: str,
+    description: str = "",
+    location: str = "",
+):
+    """Create an interview event in the recruiter's Google Calendar."""
+    return create_calendar_event(
+        candidate_name=candidate_name,
+        start_time=start_time,
+        end_time=end_time,
+        description=description,
+        location=location,
+    )
 
 if __name__ == "__main__":
     mcp.run()
