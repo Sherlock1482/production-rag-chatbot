@@ -1,4 +1,5 @@
-Name: Raj Sharma
+Name: Rajuu Sharma
+Email: rajuu.sharma@gmail.com
 Role: Senior Backend Developer
 
 Experience:

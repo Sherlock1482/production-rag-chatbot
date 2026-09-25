@@ -27,7 +27,7 @@ async def main():
 
             result = await session.call_tool(
                 "get_interview_schedule",
-                arguments={"candidate_name": "Priya"}
+                arguments={"candidate_name": "Rajdeep Pednekar"}
             )
 
             print("\nTool result:")

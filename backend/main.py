@@ -1,6 +1,8 @@
 import os
 import sys
+import re
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -141,14 +143,48 @@ async def call_interview_mcp(candidate_name: str = ""):
                     }
                 )
 
-                # Record MCP result in Langfuse
-                mcp_trace.update(
-                    output={
-                        "result": str(result)
+                # -------------------------------------------------
+                # Extract actual text returned by MCP
+                # -------------------------------------------------
+
+                if result.content:
+
+                    mcp_text = result.content[0].text
+
+                    try:
+                        mcp_data = json.loads(mcp_text)
+
+                    except json.JSONDecodeError:
+
+                        mcp_data = {
+                            "found": False,
+                            "message": "Invalid MCP response."
+                        }
+
+                else:
+
+                    mcp_data = {
+                        "found": False,
+                        "message": "No MCP response received."
                     }
+
+                # -------------------------------------------------
+                # Record clean MCP result in Langfuse
+                # -------------------------------------------------
+
+                mcp_trace.update(
+                    output=mcp_data
                 )
 
-                return result
+                print(
+                    "\n========== CLEAN MCP DATA =========="
+                )
+                print(mcp_data)
+                print(
+                    "====================================\n"
+                )
+
+                return mcp_data
 
 
 # ============================================================
@@ -393,32 +429,60 @@ async def generate_stream(rag_chain, user_prompt, request_query, relevant_docs, 
         yield "\n[Error generating response]"
 
 
-        # ----------------------------------------------------
-        # Output Guardrail
-        # ----------------------------------------------------
+async def generate_mcp_stream(mcp_data):
+    lines = []
 
-        guardrail_passed = check_output_guardrail(
-            full_response,
-            relevant_docs,
-            mcp_context
+    for result in mcp_data.get("results", []):
+        candidate = result.get("candidate", "Unknown candidate")
+        start_time = result.get("start_time", "an unspecified time")
+        description = result.get("description", "")
+
+        try:
+            if "T" in start_time:
+                interview_datetime = datetime.fromisoformat(
+                    start_time.replace("Z", "+00:00")
+                )
+                formatted_start = (
+                    f"{interview_datetime.strftime('%A, %B')} "
+                    f"{interview_datetime.day}, "
+                    f"{interview_datetime.year} at "
+                    f"{interview_datetime.strftime('%I:%M %p').lstrip('0')} UTC"
+                )
+            else:
+                interview_date = datetime.fromisoformat(start_time)
+                formatted_start = (
+                    f"{interview_date.strftime('%A, %B')} "
+                    f"{interview_date.day}, {interview_date.year}"
+                )
+        except (TypeError, ValueError):
+            formatted_start = start_time
+
+        interviewer_match = re.search(
+            r"(?im)^interviewer\s*:\s*(.+)$",
+            description
         )
 
-        if not guardrail_passed:
-
-            print(
-                "WARNING: Output guardrail blocked "
-                "the generated response."
-            )
-
-    except Exception as e:
-
-        print(
-            f"Streaming error: {e}"
+        line = (
+            f"{candidate} is scheduled for an interview on "
+            f"{formatted_start}."
         )
 
-        yield (
-            "\n[Error generating response]"
-        )
+        if interviewer_match:
+            interviewer = interviewer_match.group(1).strip().rstrip(".")
+            line += f" Interviewer: {interviewer}."
+
+        location = result.get("location", "")
+        if location:
+            line += f" Location: {location}."
+
+        meeting_link = result.get("meeting_link", "")
+        if meeting_link:
+            line += f" Meeting link: {meeting_link}."
+
+        lines.append(line)
+
+    response = "\n".join(lines)
+    yield response + "\n\nSources used\n[Live] Google Calendar via MCP\n"
 
 
 # ============================================================
@@ -495,34 +559,51 @@ async def chat_endpoint(
 
                     mcp_data = await call_interview_mcp("")
 
-                # -------------------------------------------------
-                # Otherwise, try to extract candidate name
-                # -------------------------------------------------
-
                 else:
 
-                    candidate_name = ""
+                    # -------------------------------------------------
+                    # Extract candidate name from the query
+                    # -------------------------------------------------
 
-                    words = request.query.split()
+                    candidate_query = query_lower
 
-                    for i in range(len(words) - 1):
+                    # Remove common interview/question words
+                    candidate_query = re.sub(
+                        r"\b(when|where|who|what|is|are|was|were|"
+                        r"tell|me|show|give|find|check|about|"
+                        r"interview|interviews|schedule|scheduled|"
+                        r"status|stage|for)\b",
+                        " ",
+                        candidate_query
+                    )
 
-                        first = words[i].strip("?,.!")
+                    # Remove possessive 's
+                    candidate_query = re.sub(
+                        r"'s\b",
+                        "",
+                        candidate_query
+                    )
 
-                        last = words[i + 1].strip("?,.!")
+                    # Remove punctuation
+                    candidate_query = re.sub(
+                        r"[^a-z0-9\s]",
+                        " ",
+                        candidate_query
+                    )
 
-                        if (
-                            first.istitle()
-                            and last.istitle()
-                        ):
-                            candidate_name = f"{first} {last}"
-                            break
+                    # Normalize spaces
+                    candidate_name = " ".join(
+                        candidate_query.split()
+                    )
 
                     if candidate_name:
 
                         mcp_data = await call_interview_mcp(
                             candidate_name
                         )
+                        print("\n========== MCP RESULT ==========")
+                        print(mcp_data)
+                        print("================================\n")
 
             # =================================================
             # Build MCP Context
@@ -551,6 +632,16 @@ async def chat_endpoint(
                     ),
                     "sources": []
                 }
+
+            if (
+                mcp_data
+                and mcp_data.get("found")
+                and mcp_data.get("results")
+            ):
+                return StreamingResponse(
+                    generate_mcp_stream(mcp_data),
+                    media_type="text/plain"
+                )
 
             # =================================================
             # Step 2: Retrieve and Rerank Documents
@@ -663,6 +754,10 @@ async def chat_endpoint(
             )
             print("\n========== CONTEXT SENT TO LLM ==========")
             print(combined_context)
+
+            print("\n========== MCP CONTEXT ==========")
+            print(mcp_context)
+
             print("==========================================\n")
             # =================================================
             # Step 6: System Prompt
@@ -704,6 +799,8 @@ async def chat_endpoint(
                 "For interview questions, give a concise "
                 "answer using the candidate's date, stage, "
                 "and interviewer when available. "
+                "Do not reject or ignore an MCP candidate simply because "
+                "the candidate does not appear in the Qdrant documents. "
 
                 "Do not say information is missing if "
                 "it is present in the MCP data. "
@@ -730,13 +827,13 @@ async def chat_endpoint(
             # =================================================
 
             user_prompt = (
-
-                f"Context Documents:\n"
-                f"{combined_context}\n"
-
+                f"=== AUTHORITATIVE LIVE INTERVIEW DATA ===\n"
                 f"{mcp_context}\n"
 
-                f"Recruiter Query: "
+                f"=== RESUME / DOCUMENT DATA ===\n"
+                f"{combined_context}\n"
+
+                f"=== RECRUITER QUERY ===\n"
                 f"{request.query}"
             )
 

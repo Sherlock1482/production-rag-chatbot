@@ -135,9 +135,10 @@ You are an output safety checker for a Talent Acquisition RAG system.
 Your job is to determine whether the generated answer is supported
 by the available evidence.
 
-The evidence can come from:
+There are two possible evidence sources:
+
 1. Retrieved TA documents from Qdrant
-2. Live interview data from an MCP tool
+2. Live interview data from the MCP tool connected to Google Calendar
 
 Available evidence:
 --------------------
@@ -149,22 +150,59 @@ Generated answer:
 {answer}
 --------------------
 
-Rules:
+IMPORTANT SOURCE PRIORITY RULES:
 
-1. Return ALLOW if the answer is supported by the available evidence.
-2. Return BLOCK if the answer contains information that is not supported
-   by the available evidence.
-3. Do not require the answer to use the exact wording of the evidence.
-4. Small summaries or reasonable rewording are allowed.
-5. If the answer makes up candidate information, companies, skills,
-   experience, interview dates, interview stages, or interviewers
-   that are not present in the evidence, return BLOCK.
-6. MCP interview data is valid evidence for interview-related questions.
-7. Qdrant documents are valid evidence for document-related questions.
-8. Return ONLY:
-   ALLOW
-   or
-   BLOCK
+1. For questions about interview schedules, interview dates,
+   interview times, interview stages, interviewers, interview
+   locations, or meeting links, the MCP Interview Data is the
+   authoritative source.
+
+2. If the MCP Interview Data contains the requested candidate
+   and interview information, the answer MUST be considered
+   supported by evidence.
+
+3. Do NOT require the candidate's interview information to also
+   appear in the Qdrant documents.
+
+4. Qdrant documents may contain unrelated candidate information.
+   Do NOT block an answer merely because the Qdrant documents
+   do not contain the candidate mentioned in the MCP data.
+
+5. For interview questions, ignore unrelated Qdrant candidate
+   records when deciding whether the interview answer is grounded.
+
+6. For candidate skills, experience, education, qualifications,
+   or job requirements, use the Qdrant documents as evidence.
+
+7. MCP interview data is valid evidence for interview-related
+   questions.
+
+8. Qdrant documents are valid evidence for document-related
+   questions.
+
+9. Return ALLOW if the generated answer is supported by either
+   valid MCP evidence or valid Qdrant evidence.
+
+10. Return BLOCK if the answer contains information that is not
+    supported by any available evidence.
+
+11. Small summaries or reasonable rewording are allowed.
+
+12. Do not require the answer to use the exact wording of the
+    evidence.
+
+13. Never invent candidate information, skills, experience,
+    interview dates, interview stages, interviewers, locations,
+    or meeting links.
+
+14. If MCP contains a matching interview record, information
+    such as the candidate name, date, time, role, stage, and
+    interviewer may be used in the answer if present in MCP.
+
+Return ONLY:
+ALLOW
+or
+BLOCK
 """
 
         # ====================================================
@@ -176,9 +214,23 @@ Rules:
             | client
             | StrOutputParser()
         )
-        result = guardrail_chain.invoke({"prompt": prompt}).strip().upper()
+        result = guardrail_chain.invoke(
+            {"prompt": prompt}
+        ).strip().upper()
 
-        allowed = result == "ALLOW"
+# The guardrail model may return:
+# "ALLOW"
+# or "RETURN: ALLOW"
+# or a sentence ending with "ALLOW".
+#
+# We only need to determine whether it explicitly
+# contains the final ALLOW decision.
+
+        print("\n========== OUTPUT GUARDRAIL ==========")
+        print("Guardrail result:", result)
+        print("======================================\n")
+
+        allowed = "ALLOW" in result and "BLOCK" not in result
 
         # ====================================================
         # Record result in Langfuse

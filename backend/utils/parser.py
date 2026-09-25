@@ -82,6 +82,44 @@ def parse_ta_csv(file_obj):
 
     return extracted_chunks
 
+import re
+
+##extract candidate name and email from resume text
+import re
+
+
+def extract_candidate_metadata(text: str):
+    """
+    Extract candidate name and email from resume text.
+    """
+
+    candidate_name = ""
+    email = ""
+
+    # Extract candidate name from:
+    # Name: Raj Sharma
+    name_match = re.search(
+        r"(?im)^Name\s*:\s*(.+)$",
+        text
+    )
+
+    if name_match:
+        candidate_name = name_match.group(1).strip()
+
+    # Extract email if the resume contains one
+    email_match = re.search(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+        text
+    )
+
+    if email_match:
+        email = email_match.group(0).strip()
+
+    return {
+        "candidate_name": candidate_name,
+        "email": email
+    }
+
 def parse_ta_document(file_path: str):
     """
     Parses Talent Acquisition documents
