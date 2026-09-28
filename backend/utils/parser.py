@@ -98,6 +98,7 @@ def extract_candidate_metadata(text: str):
 
     # Extract candidate name from:
     # Name: Raj Sharma
+
     name_match = re.search(
         r"(?im)^Name\s*:\s*(.+)$",
         text
@@ -107,6 +108,7 @@ def extract_candidate_metadata(text: str):
         candidate_name = name_match.group(1).strip()
 
     # Extract email if the resume contains one
+
     email_match = re.search(
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
         text

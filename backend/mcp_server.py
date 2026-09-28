@@ -134,14 +134,17 @@ def find_available_interview_slots(
 @mcp.tool()
 def create_interview_event(
     candidate_name: str,
+    candidate_email: str,
     start_time: str,
     end_time: str,
     description: str = "",
     location: str = "",
 ):
     """Create an interview event in the recruiter's Google Calendar."""
+
     return create_calendar_event(
         candidate_name=candidate_name,
+        candidate_email=candidate_email,
         start_time=start_time,
         end_time=end_time,
         description=description,

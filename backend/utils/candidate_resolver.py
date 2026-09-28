@@ -1,6 +1,8 @@
 import re
+from pathlib import Path
 
 from utils.indexer import client, embedding_model, COLLECTION_NAME
+from utils.parser import extract_candidate_metadata
 
 
 def normalize_text(text: str) -> str:
@@ -15,6 +17,27 @@ def resolve_candidate(candidate_name: str):
     Returns candidate details if an exact normalized name match is found.
     """
 
+    requested_name = normalize_text(candidate_name)
+    resumes_dir = Path(__file__).resolve().parents[1] / "data" / "resumes"
+
+    # Use resume metadata when a document has not been indexed yet.
+    if resumes_dir.exists():
+        for resume_path in resumes_dir.glob("*.txt"):
+            metadata = extract_candidate_metadata(
+                resume_path.read_text(encoding="utf-8")
+            )
+            stored_name = metadata.get("candidate_name", "")
+
+            if (
+                requested_name == normalize_text(stored_name)
+                or requested_name in normalize_text(stored_name)
+            ):
+                return {
+                    "candidate_name": stored_name,
+                    "email": metadata.get("email", ""),
+                    "source": resume_path.name,
+                }
+
     query_vector = embedding_model.embed_query(candidate_name)
 
     results = client.query_points(
@@ -23,8 +46,6 @@ def resolve_candidate(candidate_name: str):
         limit=5,
         with_payload=True,
     ).points
-
-    requested_name = normalize_text(candidate_name)
 
     for result in results:
         payload = result.payload or {}
@@ -35,6 +56,11 @@ def resolve_candidate(candidate_name: str):
             normalize_text(stored_name) == requested_name
             or requested_name in normalize_text(stored_name)
         ):
+            print("RESOLVED CANDIDATE:", {
+            "candidate_name": stored_name,
+            "email": payload.get("email", ""),
+            "source": payload.get("source", ""),
+        })
 
             return {
                 "candidate_name": stored_name,

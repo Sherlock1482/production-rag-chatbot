@@ -1,6 +1,6 @@
-Name: Priya Patel
+Name: Gaurav Pednekar
 Role: Python Developer
-
+email:pitupednekar@gmail.com
 Experience:
 4 years of experience in software development.
 

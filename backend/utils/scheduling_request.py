@@ -14,7 +14,8 @@ def extract_candidate_name(query: str) -> str:
     # Remove common scheduling words.
     candidate_query = re.sub(
         r"\b(schedule|book|set|up|arrange|an|the|interview|"
-        r"for|with|at|please|me|can|you)\b",        " ",
+        r"for|with|at|on|please|me|can|you)\b",
+        " ",
         candidate_query,
     )
 
@@ -77,7 +78,7 @@ def extract_candidate_name(query: str) -> str:
 
     # Remove timezone.
     candidate_query = re.sub(
-        r"\b(?:UTC[+-]\d{1,2}(?::\d{2})?|IST|EST|PST|CST|MST)\b",
+        r"\b(?:UTC(?:[+-]\d{1,2}(?::\d{2})?)?|IST|EST|PST|CST|MST)\b",
         " ",
         candidate_query,
         flags=re.IGNORECASE,

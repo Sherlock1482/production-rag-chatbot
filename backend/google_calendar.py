@@ -17,6 +17,7 @@ TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
 
 def create_calendar_event(
     candidate_name: str,
+    candidate_email: str,
     start_time: str,
     end_time: str,
     description: str = "",
@@ -28,6 +29,10 @@ def create_calendar_event(
         "summary": f"Interview - {candidate_name}",
         "description": description,
         "location": location,
+        "visibility": "private",
+        "guestsCanSeeOtherGuests": False,
+        "guestsCanInviteOthers": False,
+        "guestsCanModify": False,
         "start": {
             "dateTime": start_time,
             "timeZone": "UTC",
@@ -38,9 +43,15 @@ def create_calendar_event(
         },
     }
 
+    if candidate_email.strip():
+        event["attendees"] = [
+            {"email": candidate_email.strip()}
+        ]
+
     created_event = service.events().insert(
         calendarId="primary",
-        body=event
+        body=event,
+        sendUpdates="all",
     ).execute()
 
     return {

@@ -1,6 +1,6 @@
-Name: Arjun Kumar
-Role: Senior Java Developer
-email: pitupednekar@gmail.com
+Name: Damu B
+Role: Junior python Developer
+email: rajdeeppednekar1418@gmail.com
 
 Experience:
 6 years of experience in frontend development.

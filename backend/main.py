@@ -268,6 +268,7 @@ async def call_availability_mcp(start_time: str, end_time: str):
 
 async def call_create_interview_mcp(
     candidate_name: str,
+    candidate_email: str,
     start_time: str,
     end_time: str,
     description: str = "",
@@ -289,6 +290,7 @@ async def call_create_interview_mcp(
                     "create_interview_event",
                     arguments={
                         "candidate_name": candidate_name,
+                        "candidate_email": candidate_email,
                         "start_time": start_time,
                         "end_time": end_time,
                         "description": description,
@@ -784,12 +786,25 @@ async def chat_endpoint(
                     # Do not continue into RAG flow
                     # -------------------------------------------------
 
-                    candidate_name = scheduling_request["candidate"]["candidate_name"]
+                    candidate = scheduling_request.get("candidate") or {
+                        "candidate_name": scheduling_request.get(
+                            "candidate_query",
+                            "the requested candidate"
+                        ),
+                        "email": "",
+                    }
+                    candidate_name = candidate["candidate_name"]
+                    if not scheduling_request.get("candidate"):
+                        candidate_name = candidate_name.title()
 
                     if availability_result.get("available"):
 
                         create_result = await call_create_interview_mcp(
                             candidate_name=candidate_name,
+                            candidate_email=candidate.get(
+                                "email",
+                                ""
+                            ),
                             start_time=start_time,
                             end_time=end_time,
                             description="Technical Interview",
