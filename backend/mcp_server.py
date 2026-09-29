@@ -1,4 +1,5 @@
 import re
+import sys
 
 from google_calendar import (
     get_upcoming_events,
@@ -54,7 +55,8 @@ def get_interview_schedule(candidate_name: str = ""):
 
         print(
             f"MCP CHECK: candidate='{candidate_normalized}' "
-            f"against event='{event_search_text}'"
+            f"against event='{event_search_text}'",
+            file=sys.stderr,
         )
 
         # -------------------------------------------------
@@ -84,7 +86,8 @@ def get_interview_schedule(candidate_name: str = ""):
 
         print(
             f"MCP: No interview found for "
-            f"'{candidate_name}'"
+            f"'{candidate_name}'",
+            file=sys.stderr,
         )
 
         return {
@@ -95,7 +98,8 @@ def get_interview_schedule(candidate_name: str = ""):
 
     print(
         f"MCP: Found {len(results)} interview(s) "
-        f"for '{candidate_name}'"
+        f"for '{candidate_name}'",
+        file=sys.stderr,
     )
 
     return {

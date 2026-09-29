@@ -128,6 +128,7 @@ async def call_interview_mcp(candidate_name: str = ""):
         server_params = StdioServerParameters(
             command=sys.executable,
             args=[str(MCP_SERVER_PATH)],
+            env=os.environ.copy(),
         )
 
         async with stdio_client(
@@ -210,6 +211,7 @@ async def call_availability_mcp(start_time: str, end_time: str):
         server_params = StdioServerParameters(
             command=sys.executable,
             args=[str(MCP_SERVER_PATH)],
+            env=os.environ.copy(),
         )
 
         async with stdio_client(
@@ -280,6 +282,7 @@ async def call_create_interview_mcp(
         server_params = StdioServerParameters(
             command=sys.executable,
             args=[str(MCP_SERVER_PATH)],
+            env=os.environ.copy(),
         )
 
         async with stdio_client(server_params) as (read, write):
@@ -341,6 +344,7 @@ async def call_alternative_slots_mcp(
         server_params = StdioServerParameters(
             command=sys.executable,
             args=[str(MCP_SERVER_PATH)],
+            env=os.environ.copy(),
         )
 
         async with stdio_client(

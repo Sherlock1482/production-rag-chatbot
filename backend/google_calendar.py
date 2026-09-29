@@ -11,8 +11,14 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-CREDENTIALS_FILE = os.path.join(BASE_DIR, "credentials.json")
-TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
+CREDENTIALS_FILE = os.getenv(
+    "GOOGLE_CREDENTIALS_FILE",
+    os.path.join(BASE_DIR, "credentials.json"),
+)
+TOKEN_FILE = os.getenv(
+    "GOOGLE_TOKEN_FILE",
+    os.path.join(BASE_DIR, "token.json"),
+)
 
 
 def create_calendar_event(

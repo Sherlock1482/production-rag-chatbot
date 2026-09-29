@@ -1,5 +1,5 @@
 import asyncio
-
+import os
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -7,6 +7,8 @@ from mcp.client.stdio import stdio_client
 server_params = StdioServerParameters(
     command="python",
     args=["mcp_server.py"],
+    env=os.environ.copy(),
+    cwd="/app",
 )
 
 
