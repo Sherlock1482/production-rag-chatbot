@@ -18,16 +18,17 @@ pipeline {
         stage('Run Tests') {
             steps {
                 sh '''
+                    docker build -t ta-rag-backend -f backend/Dockerfile .
+
                     docker run --rm \
-                      -v "$WORKSPACE:/workspace" \
-                      -w /workspace \
-                      python:3.13-slim \
-                      bash -c "
-                        python --version &&
-                        python -m pip install --upgrade pip &&
-                        python -m pip install pytest &&
-                        python -m pytest -q
-                      "
+                    --entrypoint /bin/bash \
+                    -v "$WORKSPACE:/workspace" \
+                    -w /workspace \
+                    ta-rag-backend \
+                    -c "
+                        pip install --no-cache-dir pytest &&
+                        pytest -q
+                    "
                 '''
             }
         }
