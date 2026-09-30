@@ -1,0 +1,28 @@
+FROM python:3.13-slim
+
+WORKDIR /workspace
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install CPU-only PyTorch
+RUN pip install --no-cache-dir \
+    torch==2.14.0 \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# Install project dependencies
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+# pytest is a CI/test dependency, not an application dependency
+RUN pip install --no-cache-dir pytest
+
+# Required by the application
+RUN python -m spacy download en_core_web_sm
+
+# Match the backend environment
+RUN pip uninstall -y torchvision || true
