@@ -42,12 +42,12 @@ pipeline {
                     echo "Seeding Qdrant with test candidate data..."
 
                     docker run --rm \
-                      --network jenkins \
-                      -e QDRANT_URL=http://ci-qdrant:6333 \
-                      -v "$WORKSPACE:/workspace" \
-                      -w /workspace/backend \
-                      ta-rag-ci \
-                      python utils/indexer.py
+                    --network jenkins \
+                    -e QDRANT_URL=http://ci-qdrant:6333 \
+                    -v "$WORKSPACE:/workspace" \
+                    -w /workspace \
+                    ta-rag-ci \
+                    python -m backend.utils.indexer
 
                     echo "Running pytest..."
 
