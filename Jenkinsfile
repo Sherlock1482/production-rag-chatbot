@@ -29,7 +29,11 @@ pipeline {
 
                     echo "Waiting for Qdrant..."
 
-                    until curl -fsS http://ci-qdrant:6333/readyz; do
+                    QDRANT_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ci-qdrant)
+
+                    echo "Qdrant IP: $QDRANT_IP"
+
+                    until curl -fsS "http://$QDRANT_IP:6333/readyz"; do
                         sleep 2
                     done
 
