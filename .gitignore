@@ -8,7 +8,6 @@ node_modules/
 
 credentials.json
 token.json
-
 # Qdrant local data
 qdrant/
 qdrant-backup.tar
