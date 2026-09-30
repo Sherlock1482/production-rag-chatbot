@@ -15,20 +15,49 @@ pipeline {
             }
         }
 
-        
         stage('Run Tests') {
             steps {
                 sh '''
-                    docker build \
-                    -t ta-rag-ci \
-                    -f jenkins/Dockerfile.ci \
-                    .
+                    echo "Starting CI Qdrant..."
+
+                    docker rm -f ci-qdrant 2>/dev/null || true
+
+                    docker run -d \
+                      --name ci-qdrant \
+                      --network jenkins \
+                      qdrant/qdrant
+
+                    echo "Waiting for Qdrant..."
+
+                    until curl -fsS http://ci-qdrant:6333/readyz; do
+                        sleep 2
+                    done
+
+                    echo "Qdrant is ready"
+
+                    echo "Seeding Qdrant with test candidate data..."
 
                     docker run --rm \
-                    -v "$WORKSPACE:/workspace" \
-                    -w /workspace \
-                    ta-rag-ci \
-                    pytest -q
+                      --network jenkins \
+                      -e QDRANT_URL=http://ci-qdrant:6333 \
+                      -v "$WORKSPACE:/workspace" \
+                      -w /workspace/backend \
+                      ta-rag-ci \
+                      python utils/indexer.py
+
+                    echo "Running pytest..."
+
+                    docker run --rm \
+                      --network jenkins \
+                      -e QDRANT_URL=http://ci-qdrant:6333 \
+                      -v "$WORKSPACE:/workspace" \
+                      -w /workspace \
+                      ta-rag-ci \
+                      pytest -q
+
+                    echo "Cleaning up CI Qdrant..."
+
+                    docker rm -f ci-qdrant 2>/dev/null || true
                 '''
             }
         }
