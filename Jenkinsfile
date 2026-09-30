@@ -29,11 +29,11 @@ pipeline {
 
                     echo "Waiting for Qdrant..."
 
-                    QDRANT_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ci-qdrant)
-
-                    echo "Qdrant IP: $QDRANT_IP"
-
-                    until curl -fsS "http://$QDRANT_IP:6333/readyz"; do
+                    until docker run --rm \
+                        --network jenkins \
+                        curlimages/curl:8.11.1 \
+                        -fsS --max-time 5 \
+                        http://ci-qdrant:6333/readyz; do
                         sleep 2
                     done
 
