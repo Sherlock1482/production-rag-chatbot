@@ -18,10 +18,14 @@ spec:
       containers:
         - name: backend
           image: ta-rag-backend:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Never
+          command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
           ports:
             - containerPort: 8000
               name: http
+          env:
+            - name: QDRANT_URL
+              value: "http://qdrant-service:6333"
           envFrom:
             - configMapRef:
                 name: ta-rag-config
@@ -41,7 +45,7 @@ spec:
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 10
-            failureThreshold: 30
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /
