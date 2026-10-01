@@ -26,3 +26,6 @@ RUN python -m spacy download en_core_web_sm
 
 # Match the backend environment
 RUN pip uninstall -y torchvision || true
+
+# Ensure backend and workspace are always in PYTHONPATH for tests and modules
+ENV PYTHONPATH="/workspace/backend:/workspace"

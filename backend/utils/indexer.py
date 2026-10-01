@@ -1,11 +1,21 @@
 import os
 import hashlib
+import sys
+from pathlib import Path
+
+# Ensure backend directory is in sys.path when invoked as a module from root
+backend_dir = str(Path(__file__).resolve().parents[1])
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
 from langchain_huggingface import HuggingFaceEmbeddings
 
-from utils.parser import parse_ta_document, extract_candidate_metadata
+try:
+    from utils.parser import parse_ta_document, extract_candidate_metadata
+except ModuleNotFoundError:
+    from backend.utils.parser import parse_ta_document, extract_candidate_metadata
 
 
 # 1. Initialize Embedding Model

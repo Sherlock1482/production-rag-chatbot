@@ -25,4 +25,7 @@ RUN install -m 0755 -d /etc/apt/keyrings \
        docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
+RUN groupadd -f docker \
+    && usermod -aG docker jenkins
+
 USER jenkins
