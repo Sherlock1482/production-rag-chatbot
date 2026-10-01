@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ta-rag-config
+  namespace: ta-rag
+data:
+  QDRANT_URL: "http://qdrant-service:6333"
+  GROQ_MODEL: "allam-2-7b"
+  RERANKER_THRESHOLD: "-5.0"
+  LANGFUSE_BASE_URL: "https://cloud.langfuse.com"
+  LANGFUSE_TRACING_ENVIRONMENT: "k8s-local"
+  GOOGLE_CREDENTIALS_FILE: "/app/credentials.json"
+  GOOGLE_TOKEN_FILE: "/app/token.json"

@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ta-backend
+  namespace: ta-rag
+  labels:
+    app: ta-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ta-backend
+  template:
+    metadata:
+      labels:
+        app: ta-backend
+    spec:
+      containers:
+        - name: backend
+          image: ta-rag-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ta-rag-config
+            - secretRef:
+                name: rag-env-secret
+          volumeMounts:
+            - name: google-oauth-vol
+              mountPath: /app/credentials.json
+              subPath: credentials.json
+              readOnly: true
+            - name: google-oauth-vol
+              mountPath: /app/token.json
+              subPath: token.json
+          startupProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+      volumes:
+        - name: google-oauth-vol
+          secret:
+            secretName: google-oauth-secret
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: ta-rag
+  labels:
+    app: ta-backend
+spec:
+  type: LoadBalancer
+  selector:
+    app: ta-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
