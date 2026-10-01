@@ -195,25 +195,24 @@ if __name__ == "__main__":
         "data"
     )
 
-    resumes = [
-        os.path.join(
-            data_dir,
-            "resumes",
-            "raj.txt"
-        ),
-        os.path.join(
-            data_dir,
-            "resumes",
-            "priya.txt"
-        ),
-        os.path.join(
-            data_dir,
-            "resumes",
-            "arjun.txt"
-        )
-    ]
+    resumes_dir = os.path.join(
+        data_dir,
+        "resumes"
+    )
+
+    resumes = []
+    if os.path.exists(resumes_dir):
+        resumes = [
+            os.path.join(resumes_dir, f)
+            for f in sorted(os.listdir(resumes_dir))
+            if f.lower().endswith((".txt", ".pdf", ".docx"))
+        ]
 
     for file_path in resumes:
+
+        if not os.path.exists(file_path):
+            print(f"Skipping non-existent file: {file_path}")
+            continue
 
         chunks = parse_ta_document(
             file_path
