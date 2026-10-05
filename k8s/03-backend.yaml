@@ -32,7 +32,7 @@ spec:
               value: "/app/token.json"
           envFrom:
             - configMapRef:
-                name: ta-rag-config
+                 name: ta-rag-config
             - secretRef:
                 name: rag-env-secret
           volumeMounts:
@@ -43,6 +43,21 @@ spec:
             - name: google-oauth-vol
               mountPath: /app/token.json
               subPath: token.json
+            - name: code-overrides
+              mountPath: /app/utils/datetime_extractor.py
+              subPath: datetime_extractor.py
+            - name: code-overrides
+              mountPath: /app/utils/datetime_normalizer.py
+              subPath: datetime_normalizer.py
+            - name: code-overrides
+              mountPath: /app/utils/scheduling_request.py
+              subPath: scheduling_request.py
+            - name: code-overrides
+              mountPath: /app/utils/candidate_resolver.py
+              subPath: candidate_resolver.py
+            - name: code-overrides
+              mountPath: /app/google_calendar.py
+              subPath: google_calendar.py
           startupProbe:
             httpGet:
               path: /
@@ -54,21 +69,26 @@ spec:
             httpGet:
               path: /
               port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 5
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 15
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /
               port: 8000
-            initialDelaySeconds: 10
-            periodSeconds: 20
-            timeoutSeconds: 5
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 15
+            failureThreshold: 6
       volumes:
         - name: google-oauth-vol
           secret:
             secretName: google-oauth-secret
             optional: true
+        - name: code-overrides
+          configMap:
+            name: ta-backend-code-overrides
 ---
 apiVersion: v1
 kind: Service

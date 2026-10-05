@@ -241,8 +241,11 @@ def get_calendar_service():
 
             creds = flow.run_local_server(port=0)
 
-        with open(TOKEN_FILE, "w") as token:
-            token.write(creds.to_json())
+        try:
+            with open(TOKEN_FILE, "w") as token:
+                token.write(creds.to_json())
+        except OSError:
+            pass
 
     return build(
         "calendar",
