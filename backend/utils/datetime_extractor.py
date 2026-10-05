@@ -72,13 +72,19 @@ def extract_datetime_details(query: str):
     # -------------------------
     # Date
     # -------------------------
+    month_regex = (
+        r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
+        r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|"
+        r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+    )
+
     date_patterns = [
         r"\b\d{4}-\d{1,2}-\d{1,2}\b",
         r"\b\d{1,2}/\d{1,2}/\d{4}\b",
-        r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
-        r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|"
-        r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
-        r"\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?\b",
+        # Day Month (e.g., 7th October, 7th of October, 7 Oct, 7 October 2026)
+        r"\b\d{1,2}(?:st|nd|rd|th)?(?:\s+of)?\s+" + month_regex + r"(?:,?\s*\d{4})?\b",
+        # Month Day (e.g., October 7th, Oct 7, October 7, 2026)
+        r"\b" + month_regex + r"\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?\b",
     ]
 
     for pattern in date_patterns:

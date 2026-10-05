@@ -41,13 +41,19 @@ def extract_candidate_name(query: str) -> str:
         candidate_query,
     )
 
-    # Remove month-based dates.
-    candidate_query = re.sub(
-        r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
+    # Remove month-based dates (both Month Day like October 7th and Day Month like 7th October).
+    month_regex = (
+        r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
         r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|"
         r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
-        r"\s+\d{1,2}(?:st|nd|rd|th)?"
-        r"(?:,\s*\d{4})?\b",
+    )
+    candidate_query = re.sub(
+        r"\b\d{1,2}(?:st|nd|rd|th)?(?:\s+of)?\s+" + month_regex + r"(?:,?\s*\d{4})?\b",
+        " ",
+        candidate_query,
+    )
+    candidate_query = re.sub(
+        r"\b" + month_regex + r"\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?\b",
         " ",
         candidate_query,
     )

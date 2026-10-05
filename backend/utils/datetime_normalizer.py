@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -72,22 +73,31 @@ def normalize_datetime(
 
     parsed_date = None
 
+    # Clean ordinals (1st, 2nd, 3rd, 4th -> 1, 2, 3, 4) and connector 'of'
+    clean_date = re.sub(r"(\d+)(?:st|nd|rd|th)\b", r"\1", date_value, flags=re.IGNORECASE)
+    clean_date = re.sub(r"\bof\b", " ", clean_date, flags=re.IGNORECASE)
+    clean_date = " ".join(clean_date.split()).title()
+
     date_formats = [
         "%Y-%m-%d",
         "%m/%d/%Y",
+        "%d/%m/%Y",
         "%B %d, %Y",
         "%B %d",
         "%b %d, %Y",
         "%b %d",
+        "%d %B, %Y",
+        "%d %B %Y",
+        "%d %B",
+        "%d %b, %Y",
+        "%d %b %Y",
+        "%d %b",
     ]
 
     for date_format in date_formats:
         try:
             parsed_date = datetime.strptime(
-                date_value.replace("st", "")
-                .replace("nd", "")
-                .replace("rd", "")
-                .replace("th", ""),
+                clean_date,
                 date_format,
             )
             break

@@ -31,3 +31,12 @@ def test_schedule_details_missing_all():
     assert result["complete"] is False
     assert "date" in result["missing"]
     assert "time" in result["missing"]
+
+
+def test_schedule_details_day_month_format():
+    query = "can you schedule an interview for Shivam on 7th October at 9 AM for 1 hour?"
+    result = get_missing_schedule_details(query)
+    assert result["complete"] is True
+    assert result["details"]["date"] == "7th october"
+    assert result["details"]["time"] == "9am"
+    assert result["details"]["duration_minutes"] == 60

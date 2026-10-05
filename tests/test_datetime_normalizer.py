@@ -62,3 +62,19 @@ def test_normalize_datetime_missing_inputs():
     result = normalize_datetime({})
     assert result["start_datetime"] is None
     assert "error" in result
+
+
+def test_normalize_datetime_day_month_ordinal():
+    ref = datetime(2026, 9, 25, 10, 0)
+    details = {
+        "date": "7th october",
+        "time": "9am",
+        "duration_minutes": 60,
+    }
+    result = normalize_datetime(details, reference_datetime=ref)
+    assert result["start_datetime"] is not None
+    assert result["start_datetime"].year == 2026
+    assert result["start_datetime"].month == 10
+    assert result["start_datetime"].day == 7
+    assert result["start_datetime"].hour == 9
+    assert result["end_datetime"].hour == 10
