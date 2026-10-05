@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 from utils.schedule_details import get_missing_schedule_details
 
 

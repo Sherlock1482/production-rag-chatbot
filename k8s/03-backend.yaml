@@ -26,6 +26,10 @@ spec:
           env:
             - name: QDRANT_URL
               value: "http://qdrant-service:6333"
+            - name: GOOGLE_CREDENTIALS_FILE
+              value: "/app/credentials.json"
+            - name: GOOGLE_TOKEN_FILE
+              value: "/app/token.json"
           envFrom:
             - configMapRef:
                 name: ta-rag-config

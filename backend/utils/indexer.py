@@ -156,7 +156,7 @@ def index_ta_chunks(chunks: list, metadata_source: str):
             ).hexdigest()[:16],
             16
         )
-
+#Create a Qdrant Point
         points.append(
             PointStruct(
                 id=point_id,
@@ -169,7 +169,7 @@ def index_ta_chunks(chunks: list, metadata_source: str):
                 },
             )
         )
-
+#Send all points to Qdrant
     client.upsert(
         collection_name=COLLECTION_NAME,
         points=points

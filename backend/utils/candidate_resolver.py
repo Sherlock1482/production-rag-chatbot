@@ -51,21 +51,32 @@ def resolve_candidate(candidate_name: str):
         payload = result.payload or {}
 
         stored_name = payload.get("candidate_name", "")
+        source_name = payload.get("source", "")
+        doc_text = payload.get("text", "")
 
-        if (
+        matched = False
+        if stored_name and (
             normalize_text(stored_name) == requested_name
             or requested_name in normalize_text(stored_name)
         ):
+            matched = True
+        elif source_name and requested_name in normalize_text(source_name):
+            matched = True
+        elif doc_text and requested_name in normalize_text(doc_text[:300]):
+            matched = True
+
+        if matched:
+            resolved_name = stored_name or candidate_name.title()
             print("RESOLVED CANDIDATE:", {
-            "candidate_name": stored_name,
-            "email": payload.get("email", ""),
-            "source": payload.get("source", ""),
-        })
+                "candidate_name": resolved_name,
+                "email": payload.get("email", ""),
+                "source": source_name,
+            })
 
             return {
-                "candidate_name": stored_name,
+                "candidate_name": resolved_name,
                 "email": payload.get("email", ""),
-                "source": payload.get("source", ""),
+                "source": source_name,
             }
 
     return None

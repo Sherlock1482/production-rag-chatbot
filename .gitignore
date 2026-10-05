@@ -1,10 +1,8 @@
-@"
 .env
 venv/
 __pycache__/
 .next/
 node_modules/
-"@ | Set-Content .gitignore
 
 credentials.json
 token.json
@@ -15,3 +13,9 @@ qdrant-backup.tar
 
 # Docker
 *.tar
+
+k8s/01-secrets.yaml
+
+# Local chat history and uploads
+backend/data/chat_history.json
+backend/data/uploads/

@@ -16,6 +16,7 @@ import {
   UploadCloud,
   User,
   X,
+  Download,
 } from "lucide-react";
 
 interface Source {
@@ -229,7 +230,12 @@ export default function Home() {
       const response = await fetch("http://localhost:8000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: userMessage, top_k: 5, top_n: 3 }),
+        body: JSON.stringify({
+          query: userMessage,
+          top_k: 5,
+          top_n: 3,
+          session_id: activeChatId,
+        }),
       });
       if (!response.ok) throw new Error("Chat request failed");
 
@@ -330,6 +336,21 @@ export default function Home() {
     }
   };
 
+  const exportChatsAsJson = () => {
+    const dataStr =
+      "data:text/json;charset=utf-8," +
+      encodeURIComponent(JSON.stringify(messages, null, 2));
+    const downloadAnchor = document.createElement("a");
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute(
+      "download",
+      `chat_${new Date().toISOString().slice(0, 10)}.json`
+    );
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -339,6 +360,23 @@ export default function Home() {
             <p className="brand-name">Talent Acquisition</p>
             <p className="brand-product">RAG Copilot</p>
           </div>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={exportChatsAsJson}
+            title="Download conversation in JSON format"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "6px 12px",
+              fontSize: "13px",
+            }}
+          >
+            <Download size={14} /> Export JSON
+          </button>
         </div>
       </header>
 

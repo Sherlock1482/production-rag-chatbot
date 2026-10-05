@@ -45,7 +45,7 @@ def parse_ta_csv(file_obj):
     )
 
     extracted_chunks = []
-
+#loop through everyb row
     for _, row in df.iterrows():
 
         candidate = row.get("Candidate")
@@ -60,7 +60,7 @@ def parse_ta_csv(file_obj):
             or candidate.lower().startswith("average")
         ):
             continue
-
+        #Convert the entire row into text
         row_text = ", ".join(
             [
                 f"{col}: {val}"
@@ -96,31 +96,40 @@ def extract_candidate_metadata(text: str):
     candidate_name = ""
     email = ""
 
-    # Extract candidate name from:
-    # Name: Raj Sharma
-
-    name_match = re.search(
-        r"(?im)^Name\s*:\s*(.+)$",
-        text
-    )
-
-    if name_match:
-        candidate_name = name_match.group(1).strip()
-
     # Extract email if the resume contains one
-
     email_match = re.search(
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
         text
     )
-
     if email_match:
         email = email_match.group(0).strip()
+
+    # Extract candidate name from:
+    # 1. Explicit label (Name: ... or Candidate Name: ...)
+    name_match = re.search(
+        r"(?im)^(?:candidate\s+name|name)\s*[:\-]\s*(.+)$",
+        text
+    )
+    if name_match:
+        candidate_name = name_match.group(1).strip()
+    else:
+        # 2. Fallback: First prominent line containing a 2-4 word full name
+        for line in text.splitlines():
+            clean = line.strip()
+            if not clean or "@" in clean or "http" in clean.lower():
+                continue
+            if any(kw in clean.lower() for kw in ["resume", "curriculum", "cv", "profile", "contact", "summary"]):
+                continue
+            words = clean.split()
+            if 2 <= len(words) <= 4 and all(w.replace(".", "").isalpha() for w in words):
+                candidate_name = clean
+                break
 
     return {
         "candidate_name": candidate_name,
         "email": email
     }
+
 
 def parse_ta_document(file_path: str):
     """
@@ -315,7 +324,7 @@ def parse_ta_document(file_path: str):
                 )
 
                 current_chunk = block + "\n"
-
+        #for final chunk
         if current_chunk.strip():
 
             extracted_chunks.append(

@@ -2,7 +2,8 @@ import os
 import sys
 import re
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
+import uuid
 from pathlib import Path
 from typing import List
 
@@ -99,6 +100,88 @@ class ChatRequest(BaseModel):
     query: str
     top_k: int = 5
     top_n: int = 3
+    session_id: str = "default"
+
+
+# ============================================================
+# Chat History Persistence (Local JSON)
+# ============================================================
+
+CHAT_HISTORY_FILE = (
+    Path(__file__).resolve().parent / "data" / "chat_history.json"
+)
+
+
+def save_chat_to_json(
+    query: str,
+    response: str,
+    sources: list = None,
+    session_id: str = "default"
+):
+    """
+    Persist chat interactions to a local JSON file.
+    """
+    try:
+        CHAT_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        chats = []
+        if CHAT_HISTORY_FILE.exists():
+            try:
+                with open(CHAT_HISTORY_FILE, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if content:
+                        chats = json.loads(content)
+                        if not isinstance(chats, list):
+                            chats = []
+            except Exception as read_err:
+                print(f"Warning: Could not read existing chat history: {read_err}")
+                chats = []
+
+        entry = {
+            "id": str(uuid.uuid4()),
+            "session_id": session_id or "default",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "query": query,
+            "response": response,
+            "sources": sources or []
+        }
+        chats.append(entry)
+
+        with open(CHAT_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(chats, f, indent=2, ensure_ascii=False)
+
+        print(f"Chat saved locally to {CHAT_HISTORY_FILE}")
+    except Exception as e:
+        print(f"Failed to save chat locally: {e}")
+
+
+@app.get("/chats")
+def get_saved_chats():
+    """
+    Retrieve all chats saved in local JSON format.
+    """
+    if CHAT_HISTORY_FILE.exists():
+        try:
+            with open(CHAT_HISTORY_FILE, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    return json.loads(content)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    return []
+
+
+@app.delete("/chats")
+def clear_saved_chats():
+    """
+    Clear the local chats JSON file.
+    """
+    try:
+        if CHAT_HISTORY_FILE.exists():
+            with open(CHAT_HISTORY_FILE, "w", encoding="utf-8") as f:
+                json.dump([], f)
+        return {"message": "Chat history cleared successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================
@@ -586,7 +669,7 @@ async def upload_documents(
 # Streaming Generator
 # ============================================================
 
-async def generate_stream(rag_chain, user_prompt, request_query, relevant_docs, mcp_context):
+async def generate_stream(rag_chain, user_prompt, request_query, relevant_docs, mcp_context, session_id="default"):
     full_response = ""
 
     try:
@@ -606,12 +689,14 @@ async def generate_stream(rag_chain, user_prompt, request_query, relevant_docs, 
             print("WARNING: Output guardrail blocked the response.")
 
         citation_lines = ["", "Sources used"]
+        extracted_sources = []
 
         if mcp_context:
 
             citation_lines.append(
                 "[Live] Google Calendar via MCP"
             )
+            extracted_sources.append("[Live] Google Calendar via MCP")
 
         else:
 
@@ -630,10 +715,18 @@ async def generate_stream(rag_chain, user_prompt, request_query, relevant_docs, 
                 citation_lines.append(
                     f"[{len(seen_sources)}] {source_name}"
                 )
+                extracted_sources.append(source_name)
 
         if len(citation_lines) > 1:
             yield "\n".join(citation_lines) + "\n"
 
+        # Save to local JSON history
+        save_chat_to_json(
+            query=request_query,
+            response=full_response,
+            sources=extracted_sources,
+            session_id=session_id
+        )
 
         # -------------------------------------------------
         # Return sources
@@ -644,7 +737,7 @@ async def generate_stream(rag_chain, user_prompt, request_query, relevant_docs, 
         yield "\n[Error generating response]"
 
 
-async def generate_mcp_stream(mcp_data):
+async def generate_mcp_stream(mcp_data, request_query="", session_id="default"):
     lines = []
 
     for result in mcp_data.get("results", []):
@@ -697,6 +790,13 @@ async def generate_mcp_stream(mcp_data):
         lines.append(line)
 
     response = "\n".join(lines)
+    # Save to local JSON history
+    save_chat_to_json(
+        query=request_query,
+        response=response,
+        sources=["[Live] Google Calendar via MCP"],
+        session_id=session_id
+    )
     yield response + "\n\nSources used\n[Live] Google Calendar via MCP\n"
 
 
@@ -841,8 +941,28 @@ async def chat_endpoint(
                                 f"calendar event. Error: {create_result.get('error', 'Unknown error')}"
                             )
 
+                        save_chat_to_json(
+                            query=request.query,
+                            response=response_text,
+                            sources=["[Live] Google Calendar via MCP"],
+                            session_id=request.session_id
+                        )
+
                         return StreamingResponse(
                             iter([response_text]),
+                            media_type="text/plain"
+                        )
+
+                    if availability_result.get("error"):
+                        error_msg = f"Calendar check error: {availability_result['error']}"
+                        save_chat_to_json(
+                            query=request.query,
+                            response=error_msg,
+                            sources=["[Live] Google Calendar via MCP"],
+                            session_id=request.session_id
+                        )
+                        return StreamingResponse(
+                            iter([error_msg]),
                             media_type="text/plain"
                         )
 
@@ -856,6 +976,13 @@ async def chat_endpoint(
                             for conflict in conflicts
                         ) + "."
 
+                    save_chat_to_json(
+                        query=request.query,
+                        response=conflict_text,
+                        sources=["[Live] Google Calendar via MCP"],
+                        session_id=request.session_id
+                    )
+
                     return StreamingResponse(
                         iter([conflict_text]),
                         media_type="text/plain"
@@ -867,10 +994,15 @@ async def chat_endpoint(
                     print(schedule_details)
                     print("======================================\n")
 
+                    missing_resp = "Please provide the interview date and time."
+                    save_chat_to_json(
+                        query=request.query,
+                        response=missing_resp,
+                        sources=[],
+                        session_id=request.session_id
+                    )
                     return {
-                        "response": (
-                            "Please provide the interview date and time."
-                        ),
+                        "response": missing_resp,
                         "sources": []
                     }
                             
@@ -967,13 +1099,19 @@ async def chat_endpoint(
             if not check_input_guardrail(
                 request.query
             ):
-
+                guardrail_resp = (
+                    "I can only help with Talent "
+                    "Acquisition and recruitment-related "
+                    "questions."
+                )
+                save_chat_to_json(
+                    query=request.query,
+                    response=guardrail_resp,
+                    sources=[],
+                    session_id=request.session_id
+                )
                 return {
-                    "response": (
-                        "I can only help with Talent "
-                        "Acquisition and recruitment-related "
-                        "questions."
-                    ),
+                    "response": guardrail_resp,
                     "sources": []
                 }
 
@@ -983,7 +1121,11 @@ async def chat_endpoint(
                 and mcp_data.get("results")
             ):
                 return StreamingResponse(
-                    generate_mcp_stream(mcp_data),
+                    generate_mcp_stream(
+                        mcp_data=mcp_data,
+                        request_query=request.query,
+                        session_id=request.session_id
+                    ),
                     media_type="text/plain"
                 )
 
@@ -1007,14 +1149,20 @@ async def chat_endpoint(
                     relevant_docs
                 )
             ):
-
+                evidence_resp = (
+                    "I couldn't find enough relevant "
+                    "information in the Talent Acquisition "
+                    "documents to answer this question "
+                    "accurately."
+                )
+                save_chat_to_json(
+                    query=request.query,
+                    response=evidence_resp,
+                    sources=[],
+                    session_id=request.session_id
+                )
                 return {
-                    "response": (
-                        "I couldn't find enough relevant "
-                        "information in the Talent Acquisition "
-                        "documents to answer this question "
-                        "accurately."
-                    ),
+                    "response": evidence_resp,
                     "sources": []
                 }
 
@@ -1026,13 +1174,19 @@ async def chat_endpoint(
                 not relevant_docs
                 and not mcp_data
             ):
-
+                no_data_resp = (
+                    "I'm sorry, but I couldn't find "
+                    "relevant information in the "
+                    "TA database."
+                )
+                save_chat_to_json(
+                    query=request.query,
+                    response=no_data_resp,
+                    sources=[],
+                    session_id=request.session_id
+                )
                 return {
-                    "response": (
-                        "I'm sorry, but I couldn't find "
-                        "relevant information in the "
-                        "TA database."
-                    ),
+                    "response": no_data_resp,
                     "sources": []
                 }
 
@@ -1213,6 +1367,7 @@ async def chat_endpoint(
                     request_query=request.query,
                     relevant_docs=relevant_docs,
                     mcp_context=mcp_context,
+                    session_id=request.session_id,
                 ),
 
                 media_type="text/plain"

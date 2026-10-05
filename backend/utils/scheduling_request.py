@@ -19,9 +19,9 @@ def extract_candidate_name(query: str) -> str:
         candidate_query,
     )
 
-    # Remove relative date expressions.
+    # Remove relative date expressions (including typos like tommorow, tommrow).
     candidate_query = re.sub(
-        r"\b(today|tomorrow|day\s+after\s+tomorrow)\b",
+        r"\b(today|day\s+after\s+tom+o*r+o*w?|tom+o*r+o*w?)\b",
         " ",
         candidate_query,
     )

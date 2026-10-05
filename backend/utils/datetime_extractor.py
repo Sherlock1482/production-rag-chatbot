@@ -87,16 +87,13 @@ def extract_datetime_details(query: str):
             result["date"] = match.group(0)
             break
 
-    # Relative dates
-    relative_dates = [
-        "today",
-        "tomorrow",
-        "day after tomorrow",
-    ]
+    # Relative dates (tolerant of typos like tommorow, tomorow, tommrow)
+    if re.search(r"\bday\s+after\s+tom+o*r+o*w?\b", query_normalized):
+        result["date"] = "day after tomorrow"
+    elif re.search(r"\btom+o*r+o*w?\b", query_normalized):
+        result["date"] = "tomorrow"
+    elif re.search(r"\btoday\b", query_normalized):
+        result["date"] = "today"
 
-    for relative_date in relative_dates:
-        if relative_date in query_normalized:
-            result["date"] = relative_date
-            break
 
     return result

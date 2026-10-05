@@ -11,14 +11,22 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-CREDENTIALS_FILE = os.getenv(
-    "GOOGLE_CREDENTIALS_FILE",
-    os.path.join(BASE_DIR, "credentials.json"),
-)
-TOKEN_FILE = os.getenv(
-    "GOOGLE_TOKEN_FILE",
-    os.path.join(BASE_DIR, "token.json"),
-)
+env_creds = os.getenv("GOOGLE_CREDENTIALS_FILE", "").strip()
+if env_creds and not env_creds.startswith("{") and os.path.exists(env_creds):
+    CREDENTIALS_FILE = env_creds
+elif env_creds and not env_creds.startswith("{") and os.path.exists(os.path.join(BASE_DIR, env_creds)):
+    CREDENTIALS_FILE = os.path.join(BASE_DIR, env_creds)
+else:
+    CREDENTIALS_FILE = os.path.join(BASE_DIR, "credentials.json")
+
+env_token = os.getenv("GOOGLE_TOKEN_FILE", "").strip()
+if env_token and not env_token.startswith("{") and os.path.exists(env_token):
+    TOKEN_FILE = env_token
+elif env_token and not env_token.startswith("{") and os.path.exists(os.path.join(BASE_DIR, env_token)):
+    TOKEN_FILE = os.path.join(BASE_DIR, env_token)
+else:
+    TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
+
 
 
 def create_calendar_event(
