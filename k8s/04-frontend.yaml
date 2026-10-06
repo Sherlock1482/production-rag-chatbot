@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: ta-rag-frontend:latest
+          image: ta-rag-frontend:v2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

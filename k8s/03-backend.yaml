@@ -71,6 +71,9 @@ spec:
               mountPath: /app/google_calendar.py
               subPath: google_calendar.py
             - name: code-overrides
+              mountPath: /app/mcp_server.py
+              subPath: mcp_server.py
+            - name: code-overrides
               mountPath: /app/utils/parser.py
               subPath: parser.py
             - name: code-overrides

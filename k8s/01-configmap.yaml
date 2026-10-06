@@ -5,7 +5,7 @@ metadata:
   namespace: ta-rag
 data:
   QDRANT_URL: "http://qdrant-service:6333"
-  GROQ_MODEL: "allam-2-7b"
+  GROQ_MODEL: "qwen/qwen3.8-27b"
   RERANKER_THRESHOLD: "-5.0"
   LANGFUSE_BASE_URL: "https://cloud.langfuse.com"
   LANGFUSE_TRACING_ENVIRONMENT: "k8s-local"

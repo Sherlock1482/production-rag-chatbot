@@ -21,8 +21,9 @@ CONTEXT_REFERENCE_PATTERNS = [
 ]
 
 FILLER_WORDS = [
-    r"\b(?:can|could|would)\s+you\b",
-    r"\bplease\b",
+    r"\b(?:can|could|would)\s+(?:you|u)\b",
+    r"\b(?:can|could|would)\b",
+    r"\b(?:pls|plz|please)\b",
     r"\bkindly\b",
     r"\bone\s+more\s+interview\b",
     r"\bone\s+more\b",
@@ -337,6 +338,9 @@ def format_history_for_prompt(history: Optional[List[Dict[str, Any]]], max_turns
         role = msg.get("role", "user").capitalize()
         content = msg.get("content", "").strip()
         if content:
+            # Prevent bloated repeating messages from poisoning LLM context window
+            if len(content) > 1200:
+                content = content[:1200] + "... [truncated]"
             lines.append(f"{role}: {content}")
 
     return "\n".join(lines) if lines else "No previous conversation history."

@@ -46,7 +46,7 @@ def extract_candidate_name(query: str, chat_history: Optional[List[Dict[str, Any
     candidate_query = re.sub(
         r"\b(schedule|reschedule|book|rebook|set|up|arrange|an|the|a|interview|"
         r"interviews|meeting|call|session|slot|for|with|at|on|between|please|"
-        r"kindly|me|can|could|would|you)\b",
+        r"kindly|pls|plz|me|can|could|would|you|u)\b",
         " ",
         candidate_query,
     )
