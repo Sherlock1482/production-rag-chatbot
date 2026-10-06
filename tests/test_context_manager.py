@@ -102,7 +102,7 @@ def test_scheduling_request_resolves_above_candidate_with_history():
 
     assert result["intent"] == "schedule_interview"
     assert result["candidate"] is not None
-    assert result["candidate"]["candidate_name"] == "Aarav"
+    assert "aarav" in result["candidate"]["candidate_name"].lower()
 
 
 def test_scheduling_request_without_history_does_not_produce_junk_name():

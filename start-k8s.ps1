@@ -16,6 +16,7 @@ kubectl create configmap ta-backend-code-overrides `
   --from-file=backend/utils/context_manager.py `
   --from-file=backend/utils/schedule_details.py `
   --from-file=backend/utils/intent_detector.py `
+  --from-file=backend/utils/jd_fit_analyzer.py `
   --from-file=backend/utils/parser.py `
   --from-file=backend/utils/indexer.py `
   --from-file=backend/google_calendar.py `

@@ -65,6 +65,9 @@ spec:
               mountPath: /app/utils/intent_detector.py
               subPath: intent_detector.py
             - name: code-overrides
+              mountPath: /app/utils/jd_fit_analyzer.py
+              subPath: jd_fit_analyzer.py
+            - name: code-overrides
               mountPath: /app/google_calendar.py
               subPath: google_calendar.py
             - name: code-overrides

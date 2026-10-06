@@ -44,5 +44,19 @@ def detect_intent(query: str) -> str:
         if re.search(pattern, query_normalized):
             return "interview_lookup"
 
+    # JD fit / gap analysis intent
+    jd_fit_patterns = [
+        r"\b(?:fit|gap)\s+analysis\b",
+        r"\bmatch\s+score\b",
+        r"\bscore\s+candidate\b",
+        r"\b(?:analyze|evaluate|score)\b.*\b(?:against\s+(?:the\s+)?(?:jd|job\s+description|requirements)|for\s+(?:the\s+)?role)\b",
+        r"\b(?:against|with)\s+(?:the\s+)?(?:jd|job\s+description)\b",
+        r"\bjd\s+fit\b",
+    ]
+
+    for pattern in jd_fit_patterns:
+        if re.search(pattern, query_normalized):
+            return "analyze_jd_fit"
+
     # General candidate/RAG search
-    return "candidate_search"
+    return "candidate_search"

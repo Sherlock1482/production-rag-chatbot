@@ -20,3 +20,10 @@ def test_detect_intent_candidate_search():
     assert detect_intent("What skills does Rajuu Sharma have?") == "candidate_search"
     assert detect_intent("Find candidates with Python and FastAPI experience") == "candidate_search"
     assert detect_intent("Compare Priya and Arjun for backend engineer") == "candidate_search"
+
+
+def test_detect_intent_jd_fit():
+    assert detect_intent("Run a fit analysis for Priya Patel against the Senior Backend Engineer JD") == "analyze_jd_fit"
+    assert detect_intent("Perform gap analysis for Arjun against the DevOps requirements") == "analyze_jd_fit"
+    assert detect_intent("What is the match score for Jane Doe for this job description?") == "analyze_jd_fit"
+    assert detect_intent("Evaluate candidate Priya Patel against JD: Python FastAPI developer") == "analyze_jd_fit"

@@ -4,7 +4,10 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import {
   ArrowUpRight,
   Bot,
+  Briefcase,
   Check,
+  ChevronDown,
+  ChevronUp,
   CircleAlert,
   FileText,
   FileUp,
@@ -13,10 +16,10 @@ import {
   Plus,
   Send,
   Sparkles,
+  Target,
   UploadCloud,
   User,
   X,
-  Download,
 } from "lucide-react";
 
 interface Source {
@@ -65,6 +68,106 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function FormattedMessage({ content }: { content: string }) {
+  if (!content) return null;
+
+  const lines = content.split("\n");
+  const renderedElements: React.ReactNode[] = [];
+  let currentBullets: string[] = [];
+
+  const flushBullets = (keyIdx: number) => {
+    if (currentBullets.length > 0) {
+      renderedElements.push(
+        <ul key={`ul-${keyIdx}`} className="formatted-bullet-list">
+          {currentBullets.map((b, bIdx) => (
+            <li key={`li-${keyIdx}-${bIdx}`}>{b}</li>
+          ))}
+        </ul>
+      );
+      currentBullets = [];
+    }
+  };
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+
+    // Check dividing rules
+    if (trimmed.startsWith("----") || trimmed.startsWith("====")) {
+      flushBullets(idx);
+      renderedElements.push(<hr key={`hr-${idx}`} className="formatted-divider" />);
+      return;
+    }
+
+    // Check bullet points (• or -)
+    if (trimmed.startsWith("•") || trimmed.startsWith("- ")) {
+      const cleanBullet = trimmed.replace(/^[•\-]\s*/, "").replace(/\*\*/g, "").trim();
+      currentBullets.push(cleanBullet);
+      return;
+    }
+
+    flushBullets(idx);
+
+    if (!trimmed) return;
+
+    // Check major section headings
+    const isMainHeading =
+      trimmed.startsWith("TOP ") ||
+      trimmed.startsWith("CANDIDATE FIT & GAP ANALYSIS") ||
+      trimmed.startsWith("DETAILED CANDIDATE EVALUATION BREAKDOWN");
+
+    if (isMainHeading) {
+      renderedElements.push(
+        <h4 key={`h4-${idx}`} className="formatted-section-heading">
+          {trimmed.replace(/^[#\s]+/, "").replace(/\*\*/g, "")}
+        </h4>
+      );
+      return;
+    }
+
+    // Check subheadings (ends with :)
+    const isSubheading =
+      trimmed.endsWith(":") &&
+      (trimmed.includes("Summary") ||
+        trimmed.includes("Skills") ||
+        trimmed.includes("Strengths") ||
+        trimmed.includes("Questions") ||
+        trimmed.includes("Breakdown") ||
+        trimmed.includes("Gaps"));
+
+    if (isSubheading) {
+      renderedElements.push(
+        <h5 key={`h5-${idx}`} className="formatted-sub-heading">
+          {trimmed.replace(/^[#\s]+/, "").replace(/\*\*/g, "")}
+        </h5>
+      );
+      return;
+    }
+
+    // Check candidate line: e.g. "1. Alex — 67% Match" or "Candidate 1: Alex..."
+    const isCandidateHeading = /^(?:\d+\.|\bCandidate\s+\d+:)/i.test(trimmed);
+    if (isCandidateHeading) {
+      renderedElements.push(
+        <div key={`cand-header-${idx}`} className="formatted-candidate-heading">
+          {trimmed.replace(/\*\*/g, "")}
+        </div>
+      );
+      return;
+    }
+
+    // Clean regular paragraph
+    const cleanText = trimmed.replace(/\*\*/g, "").replace(/^[#\s]+/, "");
+    renderedElements.push(
+      <p key={`p-${idx}`} className="formatted-text-line">
+        {cleanText}
+      </p>
+    );
+  });
+
+  flushBullets(lines.length);
+
+  return <div className="formatted-message-body">{renderedElements}</div>;
+}
+
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const conversationEndRef = useRef<HTMLDivElement>(null);
@@ -77,6 +180,13 @@ export default function Home() {
   const [activeChatId, setActiveChatId] = useState("");
   const [historyReady, setHistoryReady] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [intakeTab, setIntakeTab] = useState<"general" | "jd">("general");
+  const [intakeCollapsed, setIntakeCollapsed] = useState(false);
+  const [selectedJdFile, setSelectedJdFile] = useState<File | null>(null);
+  const [jdCandidateName, setJdCandidateName] = useState("");
+  const [jdUploadStatus, setJdUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [jdUploadMessage, setJdUploadMessage] = useState("");
+  const jdFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     try {
@@ -213,6 +323,77 @@ export default function Home() {
     }
   };
 
+  const handleJdAnalysis = async () => {
+    if (!selectedJdFile) {
+      setJdUploadStatus("error");
+      setJdUploadMessage("Choose a Job Description PDF first.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", selectedJdFile);
+    formData.append("candidate_name", jdCandidateName.trim());
+    formData.append("session_id", activeChatId);
+
+    try {
+      setJdUploadStatus("uploading");
+      setJdUploadMessage(
+        jdCandidateName.trim()
+          ? `Evaluating ${jdCandidateName.trim()} against ${selectedJdFile.name}...`
+          : `Scanning Qdrant resumes to rank Top 3 matches for ${selectedJdFile.name}...`
+      );
+
+      const response = await fetch("http://localhost:8000/upload-jd", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to process JD PDF");
+      }
+
+      const data = await response.json();
+
+      if (data.status === "analyzed") {
+        setJdUploadStatus("success");
+        setJdUploadMessage(
+          data.top_candidates
+            ? `Top 3 matching candidates ranked from Qdrant.`
+            : `Analysis complete: ${data.candidate_name}.`
+        );
+
+        const promptText = data.top_candidates
+          ? `Find top candidate matches in Qdrant for Job Description: ${data.filename}`
+          : `Evaluate ${data.candidate_name} against uploaded Job Description: ${data.filename}`;
+        const finalAnswer = data.markdown_report || "Fit analysis complete.";
+        const sources = (data.sources || []).map((s: string, idx: number) => ({
+          id: idx + 1,
+          source: s,
+          text: "",
+        }));
+
+        updateMessages((current) => [
+          ...current,
+          { role: "user", content: promptText },
+          { role: "assistant", content: finalAnswer, sources },
+        ]);
+        setSelectedJdFile(null);
+      } else if (data.status === "candidate_not_found") {
+        setJdUploadStatus("error");
+        setJdUploadMessage(
+          data.message || `No resume found for candidate '${data.candidate_name}' in the knowledge base.`
+        );
+      } else {
+        setJdUploadStatus("success");
+        setJdUploadMessage(data.message || "Job Description PDF parsed successfully.");
+      }
+    } catch (err: any) {
+      setJdUploadStatus("error");
+      setJdUploadMessage(err.message || "Failed to analyze Job Description PDF.");
+    }
+  };
+
   const handleSendMessage = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!query.trim() || loading) return;
@@ -346,21 +527,6 @@ export default function Home() {
     }
   };
 
-  const exportChatsAsJson = () => {
-    const dataStr =
-      "data:text/json;charset=utf-8," +
-      encodeURIComponent(JSON.stringify(messages, null, 2));
-    const downloadAnchor = document.createElement("a");
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute(
-      "download",
-      `chat_${new Date().toISOString().slice(0, 10)}.json`
-    );
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
-
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -371,93 +537,36 @@ export default function Home() {
             <p className="brand-product">RAG Copilot</p>
           </div>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={exportChatsAsJson}
-            title="Download conversation in JSON format"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "6px 12px",
-              fontSize: "13px",
-            }}
-          >
-            <Download size={14} /> Export JSON
-          </button>
-        </div>
       </header>
 
       <div className="workspace">
         <aside className="library-panel">
-          <div className="panel-heading">
-            <div>
-              <h1>Document intake</h1>
+          {/* Top Bar: Title & Circular New Chat button */}
+          <div className="sidebar-top-bar">
+            <div className="sidebar-title-group">
+              <MessageSquare size={16} className="sidebar-title-icon" />
+              <span className="sidebar-title">Chats</span>
+              <span className="count-badge count-badge-sm">{chatHistory.length}</span>
             </div>
-            <span className="count-badge">{selectedFiles.length}</span>
-          </div>
-
-          <div className="upload-zone" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-            <div className="upload-icon"><UploadCloud size={22} /></div>
-            <h2>Drop files here</h2>
-            <p>Resumes, job descriptions, spreadsheets, or images</p>
-            <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()}>
-              <Plus size={16} /> Browse files
+            <button
+              type="button"
+              className="circle-new-chat-btn"
+              onClick={createNewChat}
+              title="Start new conversation"
+              aria-label="New chat"
+            >
+              <Plus size={18} strokeWidth={2.4} />
             </button>
-            <input ref={fileInputRef} type="file" multiple accept={acceptedFileTypes} onChange={handleFileSelect} hidden />
-            <span className="file-hint">PDF, DOCX, XLSX, TXT, PNG · up to 10 files</span>
           </div>
 
-          <div className="queue-heading">
-            <span>Upload queue</span>
-            <span>{selectedFiles.length ? `${selectedFiles.length} selected` : "Empty"}</span>
-          </div>
-
-          <div className="file-list">
-            {selectedFiles.length === 0 ? (
-              <div className="empty-files"><FileUp size={18} /><span>Selected documents appear here</span></div>
-            ) : (
-              selectedFiles.map((file) => (
-                <div className="file-row" key={`${file.name}-${file.size}`}>
-                  <div className="file-type"><FileText size={16} /></div>
-                  <div className="file-details"><strong>{file.name}</strong><span>{formatFileSize(file.size)}</span></div>
-                  <button type="button" className="icon-button" aria-label={`Remove ${file.name}`} onClick={() => setSelectedFiles((current) => current.filter((item) => item !== file))}>
-                    <X size={15} />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-
-          <button type="button" className="primary-button upload-button" onClick={handleUpload} disabled={uploadStatus === "uploading"}>
-            {uploadStatus === "uploading" ? <Loader2 size={17} className="spin" /> : <UploadCloud size={17} />}
-            {uploadStatus === "uploading" ? "Indexing documents" : "Upload & index"}
-            {uploadStatus !== "uploading" && <ArrowUpRight size={16} />}
-          </button>
-
-          {uploadMessage && (
-            <div className={`upload-feedback ${uploadStatus}`}>
-              {uploadStatus === "success" ? <Check size={16} /> : uploadStatus === "error" ? <CircleAlert size={16} /> : null}
-              <span>{uploadMessage}</span>
-            </div>
-          )}
-
-          <div className="privacy-note"><Check size={14} /><span>Documents stay in your local workspace</span></div>
-
-          <div className="history-panel">
-            <div className="history-heading">
-              <span><MessageSquare size={14} /> Chat history</span>
-              <div className="history-actions">
-                <span>{chatHistory.length}</span>
-                <button type="button" className="new-chat-button sidebar-new-chat-button" onClick={createNewChat}>
-                  <Plus size={15} /> New chat
-                </button>
+          {/* Dynamic Scrollable Chat History List (Flexible 1fr) */}
+          <div className="history-scroll-container">
+            {chatHistory.length === 0 ? (
+              <div className="empty-history">
+                <span>No previous conversations</span>
               </div>
-            </div>
-            <div className="history-list">
-              {chatHistory.map((chat) => (
+            ) : (
+              chatHistory.map((chat) => (
                 <button
                   type="button"
                   className={`history-item ${chat.id === activeChatId ? "active" : ""}`}
@@ -487,8 +596,194 @@ export default function Home() {
                     <X size={13} />
                   </span>
                 </button>
-              ))}
+              ))
+            )}
+          </div>
+
+          {/* Compact, Dynamic Intake Widget (Zero Scroll) */}
+          <div className="compact-intake-card">
+            <div className="intake-header-row">
+              <div className="intake-tab-bar compact">
+                <button
+                  type="button"
+                  className={`intake-tab-btn ${intakeTab === "general" ? "active" : ""}`}
+                  onClick={() => setIntakeTab("general")}
+                >
+                  <FileText size={12} /> Resumes
+                </button>
+                <button
+                  type="button"
+                  className={`intake-tab-btn ${intakeTab === "jd" ? "active" : ""}`}
+                  onClick={() => setIntakeTab("jd")}
+                >
+                  <Briefcase size={12} /> JD (PDF)
+                </button>
+              </div>
+
+              <button
+                type="button"
+                className="intake-toggle-btn"
+                onClick={() => setIntakeCollapsed((prev) => !prev)}
+                title={intakeCollapsed ? "Expand upload intake" : "Minimize upload intake"}
+                aria-label="Toggle intake visibility"
+              >
+                {intakeCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
             </div>
+
+            {!intakeCollapsed && (
+              <div className="intake-body-area">
+                {intakeTab === "general" ? (
+                  <>
+                    <div
+                      className="compact-dropzone"
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <UploadCloud size={16} className="compact-drop-icon" />
+                      <span className="compact-drop-text">
+                        {selectedFiles.length > 0
+                          ? `${selectedFiles.length} file(s) chosen`
+                          : "Drop resumes or browse"}
+                      </span>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        accept={acceptedFileTypes}
+                        onChange={handleFileSelect}
+                        hidden
+                      />
+                    </div>
+
+                    {selectedFiles.length > 0 && (
+                      <div className="compact-file-chip-row">
+                        {selectedFiles.map((file) => (
+                          <div className="compact-file-chip" key={`${file.name}-${file.size}`}>
+                            <span title={file.name}>{file.name}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedFiles((current) => current.filter((item) => item !== file));
+                              }}
+                              aria-label={`Remove ${file.name}`}
+                            >
+                              <X size={11} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      className="primary-button compact-action-btn"
+                      onClick={handleUpload}
+                      disabled={uploadStatus === "uploading" || selectedFiles.length === 0}
+                    >
+                      {uploadStatus === "uploading" ? (
+                        <Loader2 size={14} className="spin" />
+                      ) : (
+                        <UploadCloud size={14} />
+                      )}
+                      <span>{uploadStatus === "uploading" ? "Indexing..." : "Upload & index"}</span>
+                      {uploadStatus !== "uploading" && <ArrowUpRight size={13} />}
+                    </button>
+
+                    {uploadMessage && (
+                      <div className={`compact-feedback ${uploadStatus}`}>
+                        {uploadStatus === "success" ? <Check size={12} /> : <CircleAlert size={12} />}
+                        <span>{uploadMessage}</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div
+                      className="compact-dropzone jd"
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        const file = Array.from(event.dataTransfer.files).find((f) =>
+                          f.name.toLowerCase().endsWith(".pdf")
+                        );
+                        if (file) {
+                          setSelectedJdFile(file);
+                          setJdUploadStatus("idle");
+                          setJdUploadMessage("");
+                        }
+                      }}
+                      onClick={() => jdFileInputRef.current?.click()}
+                    >
+                      <Briefcase size={16} className="compact-drop-icon" />
+                      <span className="compact-drop-text">
+                        {selectedJdFile ? selectedJdFile.name : "Drop JD (PDF) or browse"}
+                      </span>
+                      {selectedJdFile && (
+                        <button
+                          type="button"
+                          className="compact-chip-clear"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedJdFile(null);
+                          }}
+                          aria-label="Clear selected JD"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                      <input
+                        ref={jdFileInputRef}
+                        type="file"
+                        accept=".pdf"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            setSelectedJdFile(e.target.files[0]);
+                            setJdUploadStatus("idle");
+                            setJdUploadMessage("");
+                          }
+                          e.target.value = "";
+                        }}
+                        hidden
+                      />
+                    </div>
+
+                    <div className="dynamic-jd-indicator">
+                      <Sparkles size={12} className="dynamic-jd-icon" />
+                      <span>Scans all resumes in Qdrant &amp; ranks Top 3 matching candidates</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="primary-button compact-action-btn jd"
+                      onClick={handleJdAnalysis}
+                      disabled={!selectedJdFile || jdUploadStatus === "uploading"}
+                    >
+                      {jdUploadStatus === "uploading" ? (
+                        <Loader2 size={14} className="spin" />
+                      ) : (
+                        <Target size={14} />
+                      )}
+                      <span>
+                        {jdUploadStatus === "uploading"
+                          ? "Matching Qdrant Resumes..."
+                          : "Find Top 3 Matches in Qdrant"}
+                      </span>
+                      {jdUploadStatus !== "uploading" && <ArrowUpRight size={13} />}
+                    </button>
+
+                    {jdUploadMessage && (
+                      <div className={`compact-feedback ${jdUploadStatus}`}>
+                        {jdUploadStatus === "success" ? <Check size={12} /> : <CircleAlert size={12} />}
+                        <span>{jdUploadMessage}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </aside>
 
@@ -511,11 +806,17 @@ export default function Home() {
                   <div className="message-avatar">{message.role === "user" ? <User size={15} /> : <Bot size={15} />}</div>
                   <div className="message-content">
                     <span className="message-label">{message.role === "user" ? "You" : "Copilot"}</span>
-                    <p>
-                      {message.content || (loading && message.role === "assistant" && index === messages.length - 1 ? (
-                        <><Loader2 size={15} className="spin" /> Searching your knowledge base...</>
-                      ) : null)}
-                    </p>
+                    {message.role === "assistant" ? (
+                      message.content ? (
+                        <FormattedMessage content={message.content} />
+                      ) : loading && index === messages.length - 1 ? (
+                        <p className="loading-message">
+                          <Loader2 size={15} className="spin" /> Searching your knowledge base...
+                        </p>
+                      ) : null
+                    ) : (
+                      <p>{message.content}</p>
+                    )}
                     {message.sources && message.sources.length > 0 && (
                       <div className="sources-block">
                         <span>Sources used</span>
@@ -533,11 +834,24 @@ export default function Home() {
 
           <div className="composer-wrap">
             <form className="composer" onSubmit={handleSendMessage}>
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask about candidates, skills, roles, or interviews..." aria-label="Ask the recruiting assistant" />
-              <button type="submit" className="send-button" disabled={loading || !query.trim()} aria-label="Send message"><Send size={17} /></button>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Ask about candidates, skills, roles, or interviews..."
+                aria-label="Ask the recruiting assistant"
+              />
+              <button
+                type="submit"
+                className="send-button"
+                disabled={loading || !query.trim()}
+                aria-label="Send message"
+              >
+                <Send size={17} />
+              </button>
             </form>
             <p className="composer-note">AI-generated answers are grounded in indexed evidence. Review sources before making hiring decisions.</p>
           </div>
+
         </section>
       </div>
     </main>

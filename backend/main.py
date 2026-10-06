@@ -19,7 +19,7 @@ import json
 import asyncio
 
 from fastapi.responses import StreamingResponse
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -45,10 +45,17 @@ from mcp.client.stdio import stdio_client
 
 from langfuse import get_client
 
-from utils.scheduling_request import analyze_scheduling_request
+from utils.intent_detector import detect_intent
+from utils.scheduling_request import analyze_scheduling_request, extract_candidate_name
 from utils.schedule_details import get_missing_schedule_details
 from utils.datetime_normalizer import normalize_datetime
 from utils.schedule_validator import validate_schedule
+from utils.jd_fit_analyzer import (
+    analyze_candidate_jd_fit,
+    analyze_top_candidates_for_jd,
+    format_fit_report_markdown,
+    extract_text_from_pdf,
+)
 from utils.context_manager import (
     contextualize_query,
     extract_candidate_from_history,
@@ -711,6 +718,122 @@ async def upload_documents(
 
 
 # ============================================================
+# Job Description (JD) PDF Upload & Fit Analysis Endpoint
+# ============================================================
+
+@app.post("/upload-jd")
+async def upload_jd_pdf(
+    file: UploadFile = File(...),
+    candidate_name: str = Form(""),
+    session_id: str = Form("default"),
+):
+    """
+    Accepts a Job Description in PDF form.
+    Extracts text and, if candidate_name is provided, runs instant Fit & Gap Analysis.
+    """
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported for Job Description uploads."
+        )
+
+    try:
+        jd_text = extract_text_from_pdf(file.file)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not extract text from JD PDF: {str(e)}"
+        )
+
+    clean_candidate_name = candidate_name.strip()
+
+    if not clean_candidate_name:
+        # Automatic recruiter workflow: Scan all resumes in Qdrant and rank Top 3 matches
+        top_analysis = analyze_top_candidates_for_jd(
+            jd_text=jd_text,
+            top_n=3,
+            llm=llm,
+        )
+        formatted_markdown = top_analysis["markdown_report"]
+        sources = top_analysis["sources"]
+
+        save_chat_to_json(
+            query=f"Analyze top candidates against uploaded JD PDF: {file.filename}",
+            response=formatted_markdown,
+            sources=sources,
+            session_id=session_id,
+        )
+
+        return {
+            "filename": file.filename,
+            "status": "analyzed",
+            "candidate_name": "Top 3 Matches from Qdrant",
+            "top_candidates": top_analysis["top_candidates"],
+            "markdown_report": formatted_markdown,
+            "sources": sources,
+            "message": f"Successfully evaluated '{file.filename}' and ranked Top 3 candidates from Qdrant.",
+        }
+
+    # If candidate name is provided, perform instant fit analysis
+    candidate_docs = search_and_rerank(
+        query=clean_candidate_name,
+        top_k=5,
+        top_n=3,
+    )
+
+    if not candidate_docs:
+        return {
+            "filename": file.filename,
+            "status": "candidate_not_found",
+            "candidate_name": clean_candidate_name,
+            "message": (
+                f"Parsed JD '{file.filename}', but could not find resume "
+                f"records for '{clean_candidate_name}' in the knowledge base."
+            ),
+            "jd_text": jd_text,
+        }
+
+    candidate_context = "\n\n".join(
+        f"Source [{i+1}] ({doc.get('source', 'Resume')}):\n{doc.get('text', '')}"
+        for i, doc in enumerate(candidate_docs)
+    )
+
+    try:
+        fit_report = analyze_candidate_jd_fit(
+            candidate_name=clean_candidate_name,
+            candidate_context=candidate_context,
+            jd_text=jd_text,
+            llm=llm,
+        )
+        formatted_markdown = format_fit_report_markdown(fit_report)
+    except Exception as err:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error running fit analysis: {str(err)}"
+        )
+
+    sources = [doc.get("source", "Knowledge Base") for doc in candidate_docs]
+    unique_sources = list(dict.fromkeys(sources))
+
+    save_chat_to_json(
+        query=f"Analyze {clean_candidate_name} against uploaded JD PDF: {file.filename}",
+        response=formatted_markdown,
+        sources=unique_sources,
+        session_id=session_id,
+    )
+
+    return {
+        "filename": file.filename,
+        "status": "analyzed",
+        "candidate_name": clean_candidate_name,
+        "fit_report": fit_report.model_dump(),
+        "markdown_report": formatted_markdown,
+        "sources": unique_sources,
+    }
+
+
+
+# ============================================================
 # Streaming Generator
 # ============================================================
 
@@ -1073,7 +1196,120 @@ async def chat_endpoint(
                         media_type="text/plain"
                     )
 
+            # =================================================
+            # Spec 001: Candidate vs JD Fit & Gap Analysis
+            # =================================================
+            detected_intent = detect_intent(resolved_query)
+
+            if detected_intent == "analyze_jd_fit":
+                candidate_name = extract_candidate_name(resolved_query, chat_history=history)
+                if not candidate_name or not is_valid_candidate_name(candidate_name):
+                    candidate_name = extract_candidate_from_history(history) or ""
+
+                if not candidate_name:
+                    top_analysis = analyze_top_candidates_for_jd(
+                        jd_text=resolved_query,
+                        top_n=3,
+                        llm=llm,
+                    )
+                    top_report_md = top_analysis["markdown_report"]
+                    save_chat_to_json(
+                        query=request.query,
+                        response=top_report_md,
+                        sources=top_analysis["sources"],
+                        session_id=request.session_id,
+                    )
+                    return StreamingResponse(
+                        iter([top_report_md]),
+                        media_type="text/plain",
+                    )
+
+                # Extract JD text or target role
+                jd_text = ""
+                jd_match = re.search(
+                    r"(?:jd|job\s+description|requirements)\s*[:\-]\s*(.+)",
+                    resolved_query,
+                    re.IGNORECASE | re.DOTALL,
+                )
+                if jd_match:
+                    jd_text = jd_match.group(1).strip()
+                else:
+                    role_match = re.search(
+                        r"(?:for|against)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+(?:role|position|requirements|jd))?(?:\s*$)",
+                        resolved_query,
+                        re.IGNORECASE,
+                    )
+                    if role_match:
+                        jd_text = f"Target Role: {role_match.group(1).strip()}"
+                    else:
+                        jd_text = resolved_query
+
+                with langfuse.start_as_current_observation(
+                    as_type="span",
+                    name="jd-fit-analysis",
+                    input={
+                        "candidate": candidate_name,
+                        "jd": jd_text,
+                    },
+                ) as fit_span:
+                    candidate_docs = search_and_rerank(
+                        query=candidate_name,
+                        top_k=5,
+                        top_n=3,
+                    )
+
+                    if not candidate_docs:
+                        not_found_msg = (
+                            f"I could not find resume records or qualifications for "
+                            f"'{candidate_name}' in the knowledge base."
+                        )
+                        save_chat_to_json(
+                            query=request.query,
+                            response=not_found_msg,
+                            sources=[],
+                            session_id=request.session_id,
+                        )
+                        return StreamingResponse(
+                            iter([not_found_msg]),
+                            media_type="text/plain",
+                        )
+
+                    candidate_context = "\n\n".join(
+                        f"Source [{i+1}] ({doc.get('source', 'Resume')}):\n{doc.get('text', '')}"
+                        for i, doc in enumerate(candidate_docs)
+                    )
+
+                    try:
+                        fit_report = analyze_candidate_jd_fit(
+                            candidate_name=candidate_name,
+                            candidate_context=candidate_context,
+                            jd_text=jd_text,
+                            llm=llm,
+                        )
+                        formatted_response = format_fit_report_markdown(fit_report)
+                    except Exception as err:
+                        formatted_response = f"Could not complete fit analysis: {err}"
+
+                    sources = [doc.get("source", "Knowledge Base") for doc in candidate_docs]
+                    unique_sources = list(dict.fromkeys(sources))
+                    citation_text = "\n\nSources used\n" + "\n".join(
+                        f"[{i+1}] {s}" for i, s in enumerate(unique_sources)
+                    ) + "\n"
+                    full_output = formatted_response + citation_text
+
+                    save_chat_to_json(
+                        query=request.query,
+                        response=formatted_response,
+                        sources=unique_sources,
+                        session_id=request.session_id,
+                    )
+                    return StreamingResponse(
+                        iter([full_output]),
+                        media_type="text/plain",
+                    )
+
             mcp_data = None
+
             mcp_context = ""
 
             query_lower = resolved_query.lower()
