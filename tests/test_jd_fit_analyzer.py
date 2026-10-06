@@ -131,6 +131,7 @@ def test_analyze_empty_inputs():
 
 
 def test_format_fit_report_markdown():
+    # pyrefly: ignore [missing-import]
     from utils.jd_fit_analyzer import format_fit_report_markdown
     report = CandidateFitReport(
         candidate_name="Priya Patel",
@@ -154,12 +155,14 @@ def test_format_fit_report_markdown():
 
 def test_extract_text_from_pdf_invalid():
     import io
+    # pyrefly: ignore [missing-import]
     from utils.jd_fit_analyzer import extract_text_from_pdf
     with pytest.raises(ValueError, match="Could not parse PDF"):
         extract_text_from_pdf(io.BytesIO(b"invalid pdf content"))
 
 
 def test_clean_candidate_name():
+    # pyrefly: ignore [missing-import]
     from utils.jd_fit_analyzer import clean_candidate_name
 
     assert clean_candidate_name("Aarav Sharma", "Aarav Sharma.pdf") == "Aarav Sharma"
@@ -170,6 +173,7 @@ def test_clean_candidate_name():
 
 
 def test_analyze_top_candidates_for_jd_mock(monkeypatch):
+    # pyrefly: ignore [missing-import]
     from utils.jd_fit_analyzer import analyze_top_candidates_for_jd
 
     # Mock find_top_candidates_from_qdrant
