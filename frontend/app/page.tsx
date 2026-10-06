@@ -219,6 +219,15 @@ export default function Home() {
 
     const userMessage = query.trim();
     setQuery("");
+
+    // Capture current conversation history before adding new user message
+    const recentHistory = messages
+      .filter((m) => m.content && m.content !== initialMessage.content)
+      .map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
     updateMessages((current) => [
       ...current,
       { role: "user", content: userMessage },
@@ -235,6 +244,7 @@ export default function Home() {
           top_k: 5,
           top_n: 3,
           session_id: activeChatId,
+          history: recentHistory,
         }),
       });
       if (!response.ok) throw new Error("Chat request failed");

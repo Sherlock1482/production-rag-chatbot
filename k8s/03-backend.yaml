@@ -56,8 +56,26 @@ spec:
               mountPath: /app/utils/candidate_resolver.py
               subPath: candidate_resolver.py
             - name: code-overrides
+              mountPath: /app/utils/context_manager.py
+              subPath: context_manager.py
+            - name: code-overrides
+              mountPath: /app/utils/schedule_details.py
+              subPath: schedule_details.py
+            - name: code-overrides
+              mountPath: /app/utils/intent_detector.py
+              subPath: intent_detector.py
+            - name: code-overrides
               mountPath: /app/google_calendar.py
               subPath: google_calendar.py
+            - name: code-overrides
+              mountPath: /app/utils/parser.py
+              subPath: parser.py
+            - name: code-overrides
+              mountPath: /app/utils/indexer.py
+              subPath: indexer.py
+            - name: code-overrides
+              mountPath: /app/main.py
+              subPath: main.py
           startupProbe:
             httpGet:
               path: /

@@ -15,11 +15,13 @@ def detect_intent(query: str) -> str:
 
     # Scheduling intent
     schedule_patterns = [
-        r"\bschedule\b",
-        r"\bbook\b",
+        r"\b(?:re-?)?schedule\b",
+        r"\b(?:re-?)?book\b",
         r"\bset up\b",
         r"\bset\s+up\b",
         r"\barrange\b",
+        r"\bone\s+more\s+interview\b",
+        r"\banother\s+interview\b",
     ]
 
     for pattern in schedule_patterns:

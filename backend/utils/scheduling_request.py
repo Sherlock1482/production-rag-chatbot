@@ -1,20 +1,52 @@
 import re
+from typing import Any, Dict, List, Optional
 
 from utils.intent_detector import detect_intent
 from utils.candidate_resolver import resolve_candidate
+from utils.context_manager import (
+    extract_candidate_from_history,
+    is_candidate_context_reference,
+    is_valid_candidate_name,
+)
 
 
-def extract_candidate_name(query: str) -> str:
+def extract_candidate_name(query: str, chat_history: Optional[List[Dict[str, Any]]] = None) -> str:
     """
     Extract the candidate name from a scheduling request.
+    Supports multi-turn context resolution via chat_history.
     """
+    # 1. If query contains context coreferences (e.g. 'above candidate', 'him', 'her'),
+    # resolve the candidate from recent conversation history.
+    if is_candidate_context_reference(query) and chat_history:
+        candidate_from_context = extract_candidate_from_history(chat_history)
+        if candidate_from_context and is_valid_candidate_name(candidate_from_context):
+            return candidate_from_context
 
     candidate_query = query.casefold()
 
+    # Remove conversational filler phrases
+    candidate_query = re.sub(
+        r"\b(one\s+more\s+interview|one\s+more|another\s+interview|another|"
+        r"today\s+itself|itself|again|also|as\s+well|instead|either|too)\b",
+        " ",
+        candidate_query,
+    )
+
+    # Remove context reference phrases so they aren't parsed as names
+    candidate_query = re.sub(
+        r"\b(?:the\s+)?above\s+candidate\b|\bcandidate\s+above\b|"
+        r"\b(?:the\s+)?previous\s+candidate\b|\b(?:the\s+)?same\s+candidate\b|"
+        r"\b(?:this|that|the)\s+candidate\b|\bcandidate\b|"
+        r"\b(?:him|her|them)\b",
+        " ",
+        candidate_query,
+    )
+
     # Remove common scheduling words.
     candidate_query = re.sub(
-        r"\b(schedule|book|set|up|arrange|an|the|interview|"
-        r"for|with|at|on|please|me|can|you)\b",
+        r"\b(schedule|reschedule|book|rebook|set|up|arrange|an|the|a|interview|"
+        r"interviews|meeting|call|session|slot|for|with|at|on|between|please|"
+        r"kindly|me|can|could|would|you)\b",
         " ",
         candidate_query,
     )
@@ -104,11 +136,25 @@ def extract_candidate_name(query: str) -> str:
         candidate_query,
     )
 
-    return " ".join(candidate_query.split())
+    cleaned_name = " ".join(candidate_query.split())
 
-def analyze_scheduling_request(query: str):
+    # If a valid candidate name was extracted, return it
+    if is_valid_candidate_name(cleaned_name):
+        return cleaned_name
+
+    # If no valid name was extracted, fallback to conversation history if available
+    if chat_history:
+        candidate_from_context = extract_candidate_from_history(chat_history)
+        if candidate_from_context and is_valid_candidate_name(candidate_from_context):
+            return candidate_from_context
+
+    return ""
+
+
+def analyze_scheduling_request(query: str, chat_history: Optional[List[Dict[str, Any]]] = None):
     """
     Detect intent and resolve the candidate for scheduling requests.
+    Supports multi-turn context resolution via chat_history.
     """
 
     intent = detect_intent(query)
@@ -119,23 +165,26 @@ def analyze_scheduling_request(query: str):
             "candidate": None,
         }
 
-    candidate_name = extract_candidate_name(query)
+    candidate_name = extract_candidate_name(query, chat_history=chat_history)
 
-    if not candidate_name:
+    if not candidate_name or not is_valid_candidate_name(candidate_name):
         return {
             "intent": intent,
             "candidate": None,
-            "error": "Candidate name not provided.",
+            "error": "Candidate name not provided. Which candidate would you like to schedule an interview for?",
         }
 
     candidate = resolve_candidate(candidate_name)
 
     if not candidate:
+        # Candidate not indexed in resumes/vector DB, but a valid candidate name was provided/resolved
         return {
             "intent": intent,
-            "candidate": None,
+            "candidate": {
+                "candidate_name": candidate_name.title(),
+                "email": "",
+            },
             "candidate_query": candidate_name,
-            "error": "Candidate not found.",
         }
 
     return {

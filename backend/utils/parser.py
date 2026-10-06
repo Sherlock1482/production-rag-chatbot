@@ -8,78 +8,91 @@ sys.path.append(
     str(Path(__file__).resolve().parents[1])
 )
 
+def detect_header_row(raw_df: pd.DataFrame) -> int:
+    """
+    Finds the actual table header row in a dataframe.
+    Looks for candidate/recruitment related keywords in the first 15 rows.
+    Defaults to 0 (top row) if no preamble/title row is detected.
+    """
+    header_keywords = {
+        "candidate", "candidate_name", "candidate_id", "full_name", 
+        "name", "applicant", "job_title", "role", "email", 
+        "skills", "technical_skills", "experience", "resume"
+    }
+
+    for index, row in raw_df.head(15).iterrows():
+        row_values = [
+            str(v).strip().lower()
+            for v in row.tolist()
+            if pd.notna(v)
+        ]
+        if any(any(kw in val for kw in header_keywords) for val in row_values):
+            return index
+
+    return 0
+
+
+def extract_tabular_chunks(df: pd.DataFrame) -> list:
+    """
+    Converts dataframe rows into structured text chunks for RAG embedding.
+    Intelligently handles various candidate/name column names and filters empty/summary rows.
+    """
+    df.columns = [str(c).strip() for c in df.columns]
+
+    candidate_col = None
+    for col in df.columns:
+        clean = col.lower().replace("_", " ").strip()
+        if clean in ["candidate", "candidate name", "full name", "fullname", "name", "applicant"]:
+            candidate_col = col
+            break
+
+    extracted_chunks = []
+    for _, row in df.iterrows():
+        if row.dropna().empty:
+            continue
+
+        if candidate_col and pd.notna(row.get(candidate_col)):
+            cand_str = str(row.get(candidate_col)).strip()
+            if not cand_str or cand_str.lower().startswith(("average", "total", "summary", "count")):
+                continue
+
+        row_parts = []
+        for col, val in row.items():
+            if pd.notna(val) and str(val).strip() != "":
+                row_parts.append(f"{col}: {val}")
+
+        row_text = ", ".join(row_parts)
+        if row_text.strip():
+            extracted_chunks.append(f"Candidate/Row Record: {row_text}")
+
+    return extracted_chunks
+
+
 def parse_ta_csv(file_obj):
     """
     Parse CSV directly from memory without saving it locally.
+    Supports standard CSV headers, arbitrary candidate column names,
+    and multi-row preamble/export formats.
     """
+    try:
+        raw_df = pd.read_csv(file_obj, header=None)
+    except Exception as e:
+        raise ValueError(f"Could not read CSV file: {e}")
 
-    raw_df = pd.read_csv(
-        file_obj,
-        header=None
-    )
+    if raw_df.empty:
+        return []
 
-    header_row = None
-
-    for index, row in raw_df.iterrows():
-
-        row_values = [
-            str(value).strip()
-            for value in row.tolist()
-            if pd.notna(value)
-        ]
-
-        if "Candidate" in row_values:
-            header_row = index
-            break
-
-    if header_row is None:
-        raise ValueError(
-            "Could not find the Candidate table header in CSV file."
-        )
+    header_row = detect_header_row(raw_df)
 
     file_obj.seek(0)
+    try:
+        df = pd.read_csv(file_obj, header=header_row)
+    except Exception:
+        file_obj.seek(0)
+        df = pd.read_csv(file_obj, header=0)
 
-    df = pd.read_csv(
-        file_obj,
-        header=header_row
-    )
-
-    extracted_chunks = []
-#loop through everyb row
-    for _, row in df.iterrows():
-
-        candidate = row.get("Candidate")
-
-        if pd.isna(candidate):
-            continue
-
-        candidate = str(candidate).strip()
-
-        if (
-            not candidate
-            or candidate.lower().startswith("average")
-        ):
-            continue
-        #Convert the entire row into text
-        row_text = ", ".join(
-            [
-                f"{col}: {val}"
-                for col, val in row.items()
-                if pd.notna(val)
-            ]
-        )
-
-        if row_text.strip():
-
-            extracted_chunks.append(
-                f"Candidate/Row Record: {row_text}"
-            )
-
-    print(
-        f"Successfully extracted "
-        f"{len(extracted_chunks)} CSV chunks."
-    )
-
+    extracted_chunks = extract_tabular_chunks(df)
+    print(f"Successfully extracted {len(extracted_chunks)} CSV chunks.")
     return extracted_chunks
 
 import re
@@ -156,140 +169,28 @@ def parse_ta_document(file_path: str):
     # =====================================================
 
     if file_ext == ".csv":
+        raw_df = pd.read_csv(file_path, header=None)
+        header_row = detect_header_row(raw_df)
+        try:
+            df = pd.read_csv(file_path, header=header_row)
+        except Exception:
+            df = pd.read_csv(file_path, header=0)
 
-        raw_df = pd.read_csv(
-            file_path,
-            header=None
-        )
-
-        header_row = None
-
-        # Find the actual Candidate header row
-        for index, row in raw_df.iterrows():
-
-            row_values = [
-                str(value).strip()
-                for value in row.tolist()
-                if pd.notna(value)
-            ]
-
-            if "Candidate" in row_values:
-                header_row = index
-                break
-
-        if header_row is None:
-            raise ValueError(
-                "Could not find the Candidate table header in CSV file."
-            )
-
-        # Read CSV again using the detected header
-        df = pd.read_csv(
-            file_path,
-            header=header_row
-        )
-
-        # Convert each candidate row into one logical chunk
-        for _, row in df.iterrows():
-
-            candidate = row.get("Candidate")
-
-            # Skip empty rows
-            if pd.isna(candidate):
-                continue
-
-            candidate = str(candidate).strip()
-
-            # Skip empty/summary rows
-            if (
-                not candidate
-                or candidate.lower().startswith("average")
-            ):
-                continue
-
-            row_text = ", ".join(
-                [
-                    f"{col}: {val}"
-                    for col, val in row.items()
-                    if pd.notna(val)
-                ]
-            )
-
-            if row_text.strip():
-
-                extracted_chunks.append(
-                    f"Candidate/Row Record: {row_text}"
-                )
+        extracted_chunks.extend(extract_tabular_chunks(df))
 
     # =====================================================
     # EXCEL FILES
     # =====================================================
 
     elif file_ext in [".xlsx", ".xls"]:
+        raw_df = pd.read_excel(file_path, header=None)
+        header_row = detect_header_row(raw_df)
+        try:
+            df = pd.read_excel(file_path, header=header_row)
+        except Exception:
+            df = pd.read_excel(file_path, header=0)
 
-        # Read Excel without assuming the first row
-        # is the header
-        raw_df = pd.read_excel(
-            file_path,
-            header=None
-        )
-
-        header_row = None
-
-        # Find the actual Candidate table header
-        for index, row in raw_df.iterrows():
-
-            row_values = [
-                str(value).strip()
-                for value in row.tolist()
-                if pd.notna(value)
-            ]
-
-            if "Candidate" in row_values:
-                header_row = index
-                break
-
-        if header_row is None:
-            raise ValueError(
-                "Could not find the Candidate table header in Excel file."
-            )
-
-        # Re-read Excel using detected header
-        df = pd.read_excel(
-            file_path,
-            header=header_row
-        )
-
-        # Convert each candidate row into one logical chunk
-        for _, row in df.iterrows():
-
-            candidate = row.get("Candidate")
-
-            # Skip empty rows
-            if pd.isna(candidate):
-                continue
-
-            candidate = str(candidate).strip()
-
-            # Skip empty/summary rows
-            if (
-                not candidate
-                or candidate.lower().startswith("average")
-            ):
-                continue
-
-            row_text = ", ".join(
-                [
-                    f"{col}: {val}"
-                    for col, val in row.items()
-                    if pd.notna(val)
-                ]
-            )
-
-            if row_text.strip():
-
-                extracted_chunks.append(
-                    f"Candidate/Row Record: {row_text}"
-                )
+        extracted_chunks.extend(extract_tabular_chunks(df))
 
     # =====================================================
     # PDF / DOCX / TXT / OTHER DOCUMENTS

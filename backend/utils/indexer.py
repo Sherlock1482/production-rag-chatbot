@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 import sys
 from pathlib import Path
@@ -156,7 +157,22 @@ def index_ta_chunks(chunks: list, metadata_source: str):
             ).hexdigest()[:16],
             16
         )
-#Create a Qdrant Point
+        # For tabular files, extract candidate metadata per row chunk
+        if metadata_source.lower().endswith((".csv", ".xlsx", ".xls")):
+            row_meta = extract_candidate_metadata(chunk)
+            c_name = row_meta.get("candidate_name") or ""
+            c_email = row_meta.get("email") or ""
+            if not c_name:
+                match = re.search(r"\b(?:Full_Name|Candidate|Name|Applicant)\s*:\s*([^,]+)", chunk, re.IGNORECASE)
+                if match:
+                    c_name = match.group(1).strip()
+            row_cand_name = c_name
+            row_email = c_email
+        else:
+            row_cand_name = candidate_name
+            row_email = email
+
+        # Create a Qdrant Point
         points.append(
             PointStruct(
                 id=point_id,
@@ -164,8 +180,8 @@ def index_ta_chunks(chunks: list, metadata_source: str):
                 payload={
                     "text": chunk,
                     "source": metadata_source,
-                    "candidate_name": candidate_name,
-                    "email": email,
+                    "candidate_name": row_cand_name,
+                    "email": row_email,
                 },
             )
         )

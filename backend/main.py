@@ -49,6 +49,13 @@ from utils.scheduling_request import analyze_scheduling_request
 from utils.schedule_details import get_missing_schedule_details
 from utils.datetime_normalizer import normalize_datetime
 from utils.schedule_validator import validate_schedule
+from utils.context_manager import (
+    contextualize_query,
+    extract_candidate_from_history,
+    format_history_for_prompt,
+    is_candidate_context_reference,
+    is_valid_candidate_name,
+)
 
 
 # ============================================================
@@ -101,6 +108,39 @@ class ChatRequest(BaseModel):
     top_k: int = 5
     top_n: int = 3
     session_id: str = "default"
+    history: list = []
+
+
+def get_session_history(session_id: str = "default", client_history: list = None, limit: int = 10) -> list:
+    """
+    Get the most recent conversation messages for a session.
+    Prefers client_history if supplied, otherwise loads from CHAT_HISTORY_FILE.
+    """
+    if client_history and isinstance(client_history, list) and len(client_history) > 0:
+        return client_history[-limit:]
+
+    if CHAT_HISTORY_FILE.exists():
+        try:
+            with open(CHAT_HISTORY_FILE, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    chats = json.loads(content)
+                    if isinstance(chats, list):
+                        target_session = session_id or "default"
+                        session_chats = [
+                            c for c in chats
+                            if c.get("session_id") == target_session
+                        ]
+                        history = []
+                        for c in session_chats[-limit:]:
+                            if c.get("query"):
+                                history.append({"role": "user", "content": c["query"]})
+                            if c.get("response"):
+                                history.append({"role": "assistant", "content": c["response"]})
+                        return history
+        except Exception as e:
+            print(f"Warning: Could not read session history: {e}")
+    return []
 
 
 # ============================================================
@@ -517,145 +557,150 @@ async def upload_documents(
     results = []
 
     for file in files:
+        try:
+            if file.filename.lower().endswith(".csv"):
+                extracted_chunks = parse_ta_csv(
+                    file.file
+                )
 
-        if file.filename.lower().endswith(".csv"):
+                index_ta_chunks(
+                    extracted_chunks,
+                    file.filename
+                )
 
-            extracted_chunks = parse_ta_csv(
-                file.file
+                results.append({
+                    "filename": file.filename,
+                    "type": "csv",
+                    "status": "success",
+                    "chunks": len(extracted_chunks),
+                    "message": f"Successfully indexed {len(extracted_chunks)} records."
+                })
+
+                continue
+
+            # ----------------------------------------------------
+            # Save uploaded file
+            # ----------------------------------------------------
+
+            file_path = upload_dir / file.filename
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(
+                    file.file,
+                    buffer
+                )
+
+            # ----------------------------------------------------
+            # Handle uploaded file
+            # ----------------------------------------------------
+
+            image_extensions = {
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".webp"
+            }
+
+            if file_path.suffix.lower() in image_extensions:
+                # ------------------------------------------------
+                # Extract text using PaddleOCR
+                # ------------------------------------------------
+
+                extracted_text = extract_text_from_image(
+                    str(file_path)
+                )
+
+                print("OCR TEXT:")
+                print(extracted_text)
+
+                # ------------------------------------------------
+                # Check extracted text against guardrails
+                # ------------------------------------------------
+
+                guardrail_passed = check_image_text(
+                    extracted_text
+                )
+
+                print("GUARDRAIL RESULT:")
+                print(guardrail_passed)
+
+                if not guardrail_passed:
+                    results.append({
+                        "filename": file.filename,
+                        "type": "image",
+                        "status": "blocked",
+                        "message": (
+                            "Image contains potentially unsafe instructions."
+                        )
+                    })
+                    continue
+
+                if not extracted_text.strip():
+                    results.append({
+                        "filename": file.filename,
+                        "type": "image",
+                        "status": "failed",
+                        "message": (
+                            "No text could be extracted from image."
+                        )
+                    })
+                    continue
+
+                # ------------------------------------------------
+                # Index OCR text into Qdrant
+                # ------------------------------------------------
+
+                index_ta_chunks(
+                    [extracted_text],
+                    file.filename
+                )
+
+                results.append({
+                    "filename": file.filename,
+                    "type": "image",
+                    "status": "success",
+                    "message": (
+                        "Image OCR completed and indexed successfully."
+                    )
+                })
+
+                continue
+
+            # ----------------------------------------------------
+            # Parse document
+            # ----------------------------------------------------
+
+            extracted_chunks = parse_ta_document(
+                str(file_path)
             )
+
+            # ----------------------------------------------------
+            # Index document into Qdrant
+            # ----------------------------------------------------
 
             index_ta_chunks(
                 extracted_chunks,
                 file.filename
             )
 
-            results.append({
-                "filename": file.filename,
-                "type": "csv",
-                "status": "success",
-                "chunks": len(extracted_chunks)
-            })
-
-            continue
-
-        # ----------------------------------------------------
-        # Save uploaded file
-        # ----------------------------------------------------
-
-        file_path = upload_dir / file.filename
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(
-                file.file,
-                buffer
-            )
-
-        # ----------------------------------------------------
-        # Handle uploaded file
-        # ----------------------------------------------------
-
-        image_extensions = {
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".webp"
-        }
-
-        if file_path.suffix.lower() in image_extensions:
-            # ------------------------------------------------
-            # Extract text using PaddleOCR
-            # ------------------------------------------------
-
-            extracted_text = extract_text_from_image(
-                str(file_path)
-            )
-
-            print("OCR TEXT:")
-            print(extracted_text)
-
-            # ------------------------------------------------
-            # Check extracted text against guardrails
-            # ------------------------------------------------
-
-            guardrail_passed = check_image_text(
-                extracted_text
-            )
-
-            print("GUARDRAIL RESULT:")
-            print(guardrail_passed)
-
-            if not guardrail_passed:
-
-                results.append({
-                    "filename": file.filename,
-                    "type": "image",
-                    "status": "blocked",
-                    "message": (
-                        "Image contains potentially unsafe "
-                        "instructions."
-                    )
-                })
-
-                continue
-
-            if not extracted_text.strip():
-
-                results.append({
-                    "filename": file.filename,
-                    "type": "image",
-                    "status": "failed",
-                    "message": (
-                        "No text could be extracted from image."
-                    )
-                })
-
-                continue
-
-            # ------------------------------------------------
-            # Index OCR text into Qdrant
-            # ------------------------------------------------
-
-            index_ta_chunks(
-                [extracted_text],
-                file.filename
-            )
+            # ----------------------------------------------------
+            # Store result
+            # ----------------------------------------------------
 
             results.append({
                 "filename": file.filename,
-                "type": "image",
+                "type": "document",
                 "status": "success",
-                "message": (
-                    "Image OCR completed and indexed successfully."
-                )
+                "chunks": len(extracted_chunks),
+                "message": f"Successfully indexed {len(extracted_chunks)} chunks."
             })
-
-            continue
-
-        # ----------------------------------------------------
-        # Parse document
-        # ----------------------------------------------------
-
-        extracted_chunks = parse_ta_document(
-            str(file_path)
-        )
-
-        # ----------------------------------------------------
-        # Index document into Qdrant
-        # ----------------------------------------------------
-
-        index_ta_chunks(
-            extracted_chunks,
-            file.filename
-        )
-
-        # ----------------------------------------------------
-        # Store result
-        # ----------------------------------------------------
-
-        results.append({
-            "filename": file.filename,
-            "type": "document",
-            "chunks": len(extracted_chunks)
-        })
+        except Exception as e:
+            print(f"Error processing file '{file.filename}': {e}")
+            results.append({
+                "filename": file.filename,
+                "status": "failed",
+                "message": f"Error: {str(e)}",
+                "chunks": 0
+            })
 
     return {
         "message": (
@@ -840,17 +885,25 @@ async def chat_endpoint(
             }
         ) as trace:
 
-            # =================================================
-            # Step 0: MCP Interview Data
-            # =================================================
+            # Retrieve conversation history
+            history = get_session_history(
+                session_id=request.session_id,
+                client_history=request.history,
+                limit=10,
+            )
 
-            query_lower = request.query.lower()
+            # Contextualize query with multi-turn history
+            resolved_query = contextualize_query(request.query, history)
+            print(f"\n[CONTEXT] User Query: {request.query}")
+            print(f"[CONTEXT] Resolved Query: {resolved_query}\n")
+
             # =================================================
             # Scheduling Request Analysis
             # =================================================
 
             scheduling_request = analyze_scheduling_request(
-                request.query
+                resolved_query,
+                chat_history=history,
             )
 
             print("\n========== SCHEDULING ANALYSIS ==========")
@@ -859,9 +912,34 @@ async def chat_endpoint(
 
             if scheduling_request.get("intent") == "schedule_interview":
 
-                schedule_details = get_missing_schedule_details(
-                    request.query
-                )
+                candidate = scheduling_request.get("candidate")
+                candidate_name = candidate.get("candidate_name") if candidate else ""
+
+                if not candidate or not is_valid_candidate_name(candidate_name):
+                    candidate_err = (
+                        scheduling_request.get("error")
+                        or "Please specify which candidate you would like to schedule an interview for."
+                    )
+                    save_chat_to_json(
+                        query=request.query,
+                        response=candidate_err,
+                        sources=[],
+                        session_id=request.session_id,
+                    )
+                    return StreamingResponse(
+                        iter([candidate_err]),
+                        media_type="text/plain",
+                    )
+
+                try:
+                    schedule_details = get_missing_schedule_details(
+                        resolved_query,
+                        chat_history=history,
+                    )
+                except TypeError:
+                    schedule_details = get_missing_schedule_details(
+                        resolved_query
+                    )
 
                 if schedule_details.get("complete"):
 
@@ -889,17 +967,6 @@ async def chat_endpoint(
                     # Return scheduling result directly
                     # Do not continue into RAG flow
                     # -------------------------------------------------
-
-                    candidate = scheduling_request.get("candidate") or {
-                        "candidate_name": scheduling_request.get(
-                            "candidate_query",
-                            "the requested candidate"
-                        ),
-                        "email": "",
-                    }
-                    candidate_name = candidate["candidate_name"]
-                    if not scheduling_request.get("candidate"):
-                        candidate_name = candidate_name.title()
 
                     if availability_result.get("available"):
 
@@ -1001,15 +1068,15 @@ async def chat_endpoint(
                         sources=[],
                         session_id=request.session_id
                     )
-                    return {
-                        "response": missing_resp,
-                        "sources": []
-                    }
-                            
+                    return StreamingResponse(
+                        iter([missing_resp]),
+                        media_type="text/plain"
+                    )
 
             mcp_data = None
             mcp_context = ""
 
+            query_lower = resolved_query.lower()
             interview_keywords = [
                 "interview",
                 "schedule",
@@ -1048,7 +1115,7 @@ async def chat_endpoint(
                         r"\b(when|where|who|what|is|are|was|were|"
                         r"tell|me|show|give|find|check|about|"
                         r"interview|interviews|schedule|scheduled|"
-                        r"status|stage|for)\b",
+                        r"status|stage|for|with|of|the|at)\b",
                         " ",
                         candidate_query
                     )
@@ -1071,6 +1138,9 @@ async def chat_endpoint(
                     candidate_name = " ".join(
                         candidate_query.split()
                     )
+
+                    if not candidate_name or not is_valid_candidate_name(candidate_name):
+                        candidate_name = extract_candidate_from_history(history) or ""
 
                     if candidate_name:
 
@@ -1097,7 +1167,7 @@ async def chat_endpoint(
             # =================================================
 
             if not check_input_guardrail(
-                request.query
+                resolved_query
             ):
                 guardrail_resp = (
                     "I can only help with Talent "
@@ -1134,7 +1204,7 @@ async def chat_endpoint(
             # =================================================
 
             relevant_docs = search_and_rerank(
-                query=request.query,
+                query=resolved_query,
                 top_k=request.top_k,
                 top_n=request.top_n
             )
@@ -1318,13 +1388,19 @@ async def chat_endpoint(
                 "- If the same candidate appears in multiple documents, treat those records as the same candidate unless the documents clearly indicate different people."
                 "- Do not count multiple records for the same candidate as multiple candidates."
                 "- Do not describe a candidate as a Java developer unless the context explicitly supports Java or a Java-related role."
+                "- Maintain conversational continuity across turns. If the recruiter refers to 'him', 'her', 'them', 'the candidate', or 'the above candidate', use the context from the recent conversation history to identify the candidate being discussed."
                             )
 
             # =================================================
             # Step 7: User Prompt
             # =================================================
 
+            history_context = format_history_for_prompt(history, max_turns=5)
+
             user_prompt = (
+                f"=== RECENT CONVERSATION HISTORY ===\n"
+                f"{history_context}\n\n"
+
                 f"=== AUTHORITATIVE LIVE INTERVIEW DATA ===\n"
                 f"{mcp_context}\n"
 
