@@ -16,7 +16,8 @@ CONTEXT_REFERENCE_PATTERNS = [
     r"\b(?:this|that|above)\s+applicant\b",
     r"\b(?:the|this|that|above)\s+person\b",
     r"\b(?:him|her|them)\b",
-    r"\b(?:he|she)\b",
+    r"\b(?:he|she|they)\b",
+    r"\b(?:his|her|their|theirs)\b",
     r"\b(?:above|previous)\s+one\b",
 ]
 
@@ -250,6 +251,24 @@ def extract_candidate_from_history(history: List[Dict[str, Any]]) -> Optional[st
     return None
 
 
+def query_has_explicit_candidate(text: str) -> bool:
+    """
+    Check if the user's query already contains an explicit candidate name.
+    """
+    if not text:
+        return False
+    if is_candidate_context_reference(text):
+        return False
+    try:
+        from utils.scheduling_request import extract_candidate_name
+        cand = extract_candidate_name(text, chat_history=None)
+        if cand and is_valid_candidate_name(cand):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def contextualize_query(query: str, history: Optional[List[Dict[str, Any]]]) -> str:
     """
     Contextualize the user's query by resolving coreferences like 'above candidate',
@@ -261,6 +280,10 @@ def contextualize_query(query: str, history: Optional[List[Dict[str, Any]]]) -> 
     if not history:
         return query
 
+    # If the user query ALREADY has an explicit candidate name (e.g. "for Alex"),
+    # never inject any candidate from previous turns!
+    has_explicit = query_has_explicit_candidate(query)
+
     candidate = extract_candidate_from_history(history)
     if not candidate:
         return query
@@ -268,27 +291,25 @@ def contextualize_query(query: str, history: Optional[List[Dict[str, Any]]]) -> 
     modified = query
 
     # 1. Replace coreference phrases targeting the candidate
-    # e.g., "with the above candidate" -> "with Aarav"
-    # "for the above candidate" -> "for Aarav"
-    coref_subs = [
-        (r"(?i)\b(?:with|for)\s+(?:the\s+)?above\s+candidate\b", f"for {candidate}"),
-        (r"(?i)\b(?:with|for)\s+(?:the\s+)?previous\s+candidate\b", f"for {candidate}"),
-        (r"(?i)\b(?:with|for)\s+(?:the\s+)?same\s+candidate\b", f"for {candidate}"),
-        (r"(?i)\b(?:with|for)\s+(?:this|that|the)\s+candidate\b", f"for {candidate}"),
-        (r"(?i)\b(?:with|for)\s+(?:him|her|them)\b", f"for {candidate}"),
-        (r"(?i)\b(?:the\s+)?above\s+candidate(?:'s)?\b", f"{candidate}'s"),
-        (r"(?i)\b(?:the\s+)?previous\s+candidate(?:'s)?\b", f"{candidate}'s"),
-        (r"(?i)\b(?:the\s+)?same\s+candidate(?:'s)?\b", f"{candidate}'s"),
-        (r"(?i)\b(?:this|that|the)\s+candidate(?:'s)?\b", f"{candidate}'s"),
-        (r"(?i)\bhis\b", f"{candidate}'s"),
-        (r"(?i)\bher\b", f"{candidate}'s"),
-        (r"(?i)\bhim\b", candidate),
-    ]
-
+    # (only if query contains coreferences like "above candidate", "him", "her")
     has_coref = is_candidate_context_reference(query)
-
-    for pattern, replacement in coref_subs:
-        modified = re.sub(pattern, replacement, modified)
+    if has_coref:
+        coref_subs = [
+            (r"(?i)\b(?:with|for)\s+(?:the\s+)?above\s+candidate\b", f"for {candidate}"),
+            (r"(?i)\b(?:with|for)\s+(?:the\s+)?previous\s+candidate\b", f"for {candidate}"),
+            (r"(?i)\b(?:with|for)\s+(?:the\s+)?same\s+candidate\b", f"for {candidate}"),
+            (r"(?i)\b(?:with|for)\s+(?:this|that|the)\s+candidate\b", f"for {candidate}"),
+            (r"(?i)\b(?:with|for)\s+(?:him|her|them)\b", f"for {candidate}"),
+            (r"(?i)\b(?:the\s+)?above\s+candidate(?:'s)?\b", f"{candidate}'s"),
+            (r"(?i)\b(?:the\s+)?previous\s+candidate(?:'s)?\b", f"{candidate}'s"),
+            (r"(?i)\b(?:the\s+)?same\s+candidate(?:'s)?\b", f"{candidate}'s"),
+            (r"(?i)\b(?:this|that|the)\s+candidate(?:'s)?\b", f"{candidate}'s"),
+            (r"(?i)\bhis\b", f"{candidate}'s"),
+            (r"(?i)\bher\b", f"{candidate}'s"),
+            (r"(?i)\bhim\b", candidate),
+        ]
+        for pattern, replacement in coref_subs:
+            modified = re.sub(pattern, replacement, modified)
 
     # 2. Clean conversational filler in scheduling queries
     # e.g. "one more interview today itself" -> "an interview today"
@@ -298,25 +319,26 @@ def contextualize_query(query: str, history: Optional[List[Dict[str, Any]]]) -> 
     modified = re.sub(r"(?i)\btoday\s+itself\b", "today", modified)
     modified = re.sub(r"(?i)\bitself\b", "", modified)
 
-    # 3. If query was a scheduling request that lacked a candidate entirely,
-    # and has_coref or candidate not yet mentioned in modified query:
-    if re.search(r"(?i)\b(?:schedule|book|arrange|set\s+up)\b", modified):
-        if candidate.lower() not in modified.lower():
-            # Insert candidate: e.g. "schedule an interview for Aarav"
-            if re.search(r"(?i)\b(?:interview)\b", modified):
-                modified = re.sub(
-                    r"(?i)\b(interview)\b",
-                    f"interview for {candidate}",
-                    modified,
-                    count=1,
-                )
-            else:
-                modified = re.sub(
-                    r"(?i)\b(schedule|book|arrange|set\s+up)\b",
-                    rf"\1 an interview for {candidate}",
-                    modified,
-                    count=1,
-                )
+    # 3. If query was a scheduling request that lacked a candidate entirely:
+    # Do NOT inject candidate if the user already specified an explicit candidate!
+    if not has_explicit and not has_coref:
+        if re.search(r"(?i)\b(?:schedule|book|arrange|set\s+up)\b", modified):
+            if candidate.lower() not in modified.lower():
+                # Insert candidate: e.g. "schedule an interview for Aarav"
+                if re.search(r"(?i)\b(?:interview)\b", modified):
+                    modified = re.sub(
+                        r"(?i)\b(interview)\b",
+                        f"interview for {candidate}",
+                        modified,
+                        count=1,
+                    )
+                else:
+                    modified = re.sub(
+                        r"(?i)\b(schedule|book|arrange|set\s+up)\b",
+                        rf"\1 an interview for {candidate}",
+                        modified,
+                        count=1,
+                    )
 
     # Clean double spaces
     modified = " ".join(modified.split())
@@ -338,9 +360,17 @@ def format_history_for_prompt(history: Optional[List[Dict[str, Any]]], max_turns
         role = msg.get("role", "user").capitalize()
         content = msg.get("content", "").strip()
         if content:
+            # Strip trailing sources from past assistant turns to prevent LLM from mimicking/repeating sources
+            content = re.sub(
+                r"\n+(?:Sources used|Sources:?).*$",
+                "",
+                content,
+                flags=re.IGNORECASE | re.DOTALL,
+            ).strip()
             # Prevent bloated repeating messages from poisoning LLM context window
             if len(content) > 1200:
                 content = content[:1200] + "... [truncated]"
-            lines.append(f"{role}: {content}")
+            if content:
+                lines.append(f"{role}: {content}")
 
     return "\n".join(lines) if lines else "No previous conversation history."

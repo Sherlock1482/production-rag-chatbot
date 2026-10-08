@@ -31,10 +31,11 @@ RERANKER_THRESHOLD = float(
 # ============================================================
 
 def check_evidence_guardrail(
-    relevant_docs: list
+    relevant_docs: list,
+    has_graph_evidence: bool = False
 ) -> bool:
     """
-    Checks whether the retrieved documents contain
+    Checks whether the retrieved documents or Knowledge Graph contain
     sufficient evidence to answer the user's question.
 
     Returns:
@@ -53,9 +54,26 @@ def check_evidence_guardrail(
             "documents_received": len(
                 relevant_docs
             ),
-            "threshold": RERANKER_THRESHOLD
+            "threshold": RERANKER_THRESHOLD,
+            "has_graph_evidence": has_graph_evidence
         }
     ) as guardrail_trace:
+
+        # ----------------------------------------------------
+        # Knowledge Graph verified evidence
+        # ----------------------------------------------------
+
+        if has_graph_evidence:
+
+            guardrail_trace.update(
+                output={
+                    "allowed": True,
+                    "reason": "Knowledge Graph provided verified candidate evidence",
+                    "has_graph_evidence": True
+                }
+            )
+
+            return True
 
         # ----------------------------------------------------
         # No documents

@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 
 interface Source {
-  id: number;
+  id: number | string;
   source: string;
   text: string;
 }
@@ -71,7 +71,14 @@ function formatFileSize(bytes: number) {
 function FormattedMessage({ content }: { content: string }) {
   if (!content) return null;
 
-  const lines = content.split("\n");
+  // Sanitize Windows console mojibake (e.g. ΓÇó -> - , ΓÇö -> - ) and normalize bullets/dashes
+  const sanitized = content
+    .replace(/ΓÇó/g, "- ")
+    .replace(/ΓÇö/g, " - ")
+    .replace(/[•●]/g, "- ")
+    .replace(/[—–]/g, " - ");
+
+  const lines = sanitized.split("\n");
   const renderedElements: React.ReactNode[] = [];
   let currentBullets: string[] = [];
 
@@ -98,9 +105,9 @@ function FormattedMessage({ content }: { content: string }) {
       return;
     }
 
-    // Check bullet points (• or -)
-    if (trimmed.startsWith("•") || trimmed.startsWith("- ")) {
-      const cleanBullet = trimmed.replace(/^[•\-]\s*/, "").replace(/\*\*/g, "").trim();
+    // Check bullet points (- or *)
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      const cleanBullet = trimmed.replace(/^[\-\*]\s*/, "").replace(/\*\*/g, "").trim();
       currentBullets.push(cleanBullet);
       return;
     }
@@ -113,6 +120,7 @@ function FormattedMessage({ content }: { content: string }) {
     const isMainHeading =
       trimmed.startsWith("TOP ") ||
       trimmed.startsWith("CANDIDATE FIT & GAP ANALYSIS") ||
+      trimmed.startsWith("CANDIDATE MATCH & COMPARISON SUMMARY") ||
       trimmed.startsWith("DETAILED CANDIDATE EVALUATION BREAKDOWN");
 
     if (isMainHeading) {
@@ -483,23 +491,38 @@ export default function Home() {
           });
         }
 
-        const citationMarker = "\nSources:\n";
-        const citationIndex = streamedResponse.indexOf(citationMarker);
-        const answer = citationIndex >= 0
-          ? streamedResponse.slice(0, citationIndex).trimEnd()
-          : streamedResponse;
-        const citations = citationIndex >= 0
-          ? streamedResponse
-              .slice(citationIndex + citationMarker.length)
-              .split("\n")
-              .map((line) => line.match(/^\[(\d+)\]\s+(.+)$/))
-              .filter((match): match is RegExpMatchArray => match !== null)
-              .map(([, id, source]) => ({
-                id: Number(id),
-                source,
-                text: "",
-              }))
-          : [];
+        const parseStreamedContent = (raw: string) => {
+          const match = raw.match(/\n+(?:Sources used|Sources:?)\s*(?:\n|$)/i);
+          if (!match || match.index === undefined) {
+            return { answer: raw, citations: [] };
+          }
+          const answer = raw.slice(0, match.index).trimEnd();
+          const remaining = raw.slice(match.index + match[0].length);
+          const seen = new Set<string>();
+          const citations = remaining
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .map((l) => {
+              const m = l.match(/^\[([^\]]+)\]\s*(.+)$/);
+              return m ? { id: m[1], source: m[2].trim() } : null;
+            })
+            .filter((item): item is { id: string; source: string } => item !== null)
+            .filter((item) => {
+              const key = item.source.toLowerCase();
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            })
+            .map((item, idx) => ({
+              id: item.id.toLowerCase() === "live" ? "Live" : idx + 1,
+              source: item.source,
+              text: "",
+            }));
+          return { answer, citations };
+        };
+
+        const { answer, citations } = parseStreamedContent(streamedResponse);
 
         updateMessages((current) => {
           const next = [...current];
@@ -821,7 +844,7 @@ export default function Home() {
                       <div className="sources-block">
                         <span>Sources used</span>
                         <div className="source-list">
-                          {message.sources.map((source) => <div className="source-pill" key={source.id}><FileText size={13} /> [{source.id}] {source.source}</div>)}
+                          {message.sources.map((source) => <div className="source-pill" key={`${source.id}-${source.source}`}><FileText size={13} /> [{source.id}] {source.source}</div>)}
                         </div>
                       </div>
                     )}

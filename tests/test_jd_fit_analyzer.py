@@ -170,6 +170,8 @@ def test_clean_candidate_name():
     assert clean_candidate_name("TECHNICAL SKILLS", "alex.pdf") == "Alex"
     assert clean_candidate_name("", "Avery_Chen_Resume.docx") == "Avery Chen"
     assert clean_candidate_name(None, "Rajdeep.pdf") == "Rajdeep"
+    assert clean_candidate_name("Vikram Malhotra Etc Excel", "Vikram Malhotra etc excel.xlsx") == "Vikram Malhotra"
+    assert clean_candidate_name(None, "Vikram Malhotra etc excel.xlsx") == "Vikram Malhotra"
 
 
 def test_analyze_top_candidates_for_jd_mock(monkeypatch):
@@ -229,5 +231,11 @@ def test_analyze_top_candidates_for_jd_mock(monkeypatch):
     assert "markdown_report" in result
     assert "CANDIDATE MATCH & COMPARISON SUMMARY" in result["markdown_report"].upper()
     assert "Aarav Sharma.pdf" in result["sources"]
+    # Verify no unreadable unicode bullets or em-dashes
+    assert "•" not in result["markdown_report"]
+    assert "—" not in result["markdown_report"]
+    # Verify concise report without redundant breakdown
+    assert "DETAILED CANDIDATE EVALUATION BREAKDOWN" not in result["markdown_report"]
+
 
 

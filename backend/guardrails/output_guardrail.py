@@ -43,11 +43,12 @@ langfuse = get_client()
 def check_output_guardrail(
     answer: str,
     relevant_docs: list,
-    mcp_context: str = ""
+    mcp_context: str = "",
+    graph_context: str = ""
 ) -> bool:
     """
     Checks whether the generated answer is supported
-    by retrieved documents or MCP data.
+    by retrieved documents, MCP data, or the Neo4j Knowledge Graph.
 
     Returns:
         True  -> answer is sufficiently grounded
@@ -68,6 +69,9 @@ def check_output_guardrail(
             ),
             "has_mcp_context": bool(
                 mcp_context
+            ),
+            "has_graph_context": bool(
+                graph_context
             )
         },
         model=os.getenv("GROQ_MODEL")
@@ -88,7 +92,7 @@ def check_output_guardrail(
 
             return False
 
-        if not relevant_docs and not mcp_context:
+        if not relevant_docs and not mcp_context and not graph_context:
 
             guardrail_trace.update(
                 output={
@@ -110,7 +114,7 @@ def check_output_guardrail(
         )
 
         # ----------------------------------------------------
-        # Combine Qdrant + MCP evidence
+        # Combine Qdrant + MCP + Knowledge Graph evidence
         # ----------------------------------------------------
 
         context = f"""
@@ -122,6 +126,11 @@ Retrieved TA Documents:
 MCP Interview Data:
 --------------------
 {mcp_context}
+--------------------
+
+Knowledge Graph Verified Data:
+--------------------
+{graph_context}
 --------------------
 """
 

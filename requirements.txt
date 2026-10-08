@@ -143,3 +143,4 @@ xlsxwriter==3.2.9
 langchain-core>=0.3.0
 langchain-groq>=0.2.0
 langchain-huggingface>=0.1.0
+neo4j>=5.18.0

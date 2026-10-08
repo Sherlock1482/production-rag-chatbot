@@ -15,8 +15,16 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 try:
     from utils.parser import parse_ta_document, extract_candidate_metadata
-except ModuleNotFoundError:
+except (ImportError, ModuleNotFoundError):
     from backend.utils.parser import parse_ta_document, extract_candidate_metadata
+
+try:
+    from utils.graph_extractor import ingest_document_to_graph
+except (ImportError, ModuleNotFoundError):
+    try:
+        from backend.utils.graph_extractor import ingest_document_to_graph
+    except (ImportError, ModuleNotFoundError):
+        ingest_document_to_graph = None
 
 
 # 1. Initialize Embedding Model
@@ -194,6 +202,14 @@ def index_ta_chunks(chunks: list, metadata_source: str):
     print(
         f"Successfully indexed {len(points)} chunks into Qdrant!"
     )
+
+    # Ingest candidate entities and relationships into Neo4j Knowledge Graph
+    if ingest_document_to_graph is not None:
+        try:
+            graph_res = ingest_document_to_graph(full_text, metadata_source)
+            print(f"Graph ingestion completed for {metadata_source}: {graph_res}")
+        except Exception as graph_err:
+            print(f"Warning: Graph ingestion failed for {metadata_source}: {graph_err}")
 
 
 if __name__ == "__main__":

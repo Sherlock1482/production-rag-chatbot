@@ -26,6 +26,12 @@ kubectl create configmap ta-backend-code-overrides `
   --from-file=backend/utils/indexer.py `
   --from-file=backend/google_calendar.py `
   --from-file=backend/mcp_server.py `
+  --from-file=backend/utils/graph_db.py `
+  --from-file=backend/utils/graph_extractor.py `
+  --from-file=backend/utils/graph_retriever.py `
+  --from-file=backend/utils/graph_schema.py `
+  --from-file=backend/guardrails/evidence_guardrail.py `
+  --from-file=backend/guardrails/output_guardrail.py `
   --from-file=backend/main.py `
   -n ta-rag --dry-run=client -o yaml | Out-File -FilePath k8s/01-code-overrides.yaml -Encoding utf8
 
@@ -42,7 +48,7 @@ kubectl scale deployment --all --replicas=1 -n ta-rag
 kubectl rollout restart deployment ta-backend ta-frontend -n ta-rag
 
 # 5. Wait for deployments to be ready
-Write-Host "`n[4/5] Waiting for services to become ready..." -ForegroundColor Yellow
+kubectl rollout status deployment neo4j -n ta-rag --timeout=90s
 kubectl rollout status deployment qdrant -n ta-rag --timeout=60s
 kubectl rollout status deployment ta-frontend -n ta-rag --timeout=90s
 Write-Host "Waiting for backend models (embedding + reranker) to load..." -ForegroundColor Yellow

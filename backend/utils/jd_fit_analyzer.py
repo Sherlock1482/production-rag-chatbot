@@ -195,51 +195,30 @@ def analyze_candidate_jd_fit(
 
 def format_fit_report_markdown(report: CandidateFitReport) -> str:
     """
-    Renders a clean, structured, and professional corporate report from CandidateFitReport.
-    No emojis or raw markdown table syntax.
+    Renders an executive, concise markdown report from CandidateFitReport.
+    Uses standard markdown hyphens (-) to ensure universal readability across all operating systems.
     """
+    rec = "Recommended for Interview" if report.match_score_percent >= 80 else "Secondary Consideration" if report.match_score_percent >= 60 else "Low Fit"
     lines = [
         f"CANDIDATE FIT & GAP ANALYSIS: {report.candidate_name.upper()}",
-        f"Target Role: {report.target_role}",
-        f"Match Score: {report.match_score_percent}%",
+        f"- Target Role: {report.target_role}",
+        f"- Match Score: {report.match_score_percent}% ({rec})",
+        f"- Executive Summary: {report.executive_summary}",
         "",
-        "Executive Summary:",
-        f"{report.executive_summary}",
-        "",
-        "Matched Required Skills:",
     ]
-    if report.matched_required_skills:
-        for s in report.matched_required_skills:
-            lines.append(f"  • {s} (Verified in resume)")
-    else:
-        lines.append("  • None identified")
+    matched_skills = ", ".join(report.matched_required_skills[:6]) if report.matched_required_skills else "None identified"
+    gaps_skills = ", ".join(report.missing_required_skills[:6]) if report.missing_required_skills else "No required skill gaps detected"
 
-    lines.append("")
-    lines.append("Missing Required Skills (Gaps):")
-    if report.missing_required_skills:
-        for s in report.missing_required_skills:
-            lines.append(f"  • {s} (Not found in resume)")
-    else:
-        lines.append("  • No required skill gaps detected")
-
-    if report.matched_preferred_skills or report.missing_preferred_skills:
-        lines.append("")
-        lines.append("Preferred / Nice-to-Have Skills:")
-        for s in report.matched_preferred_skills:
-            lines.append(f"  • [Met] {s}")
-        for s in report.missing_preferred_skills:
-            lines.append(f"  • [Missing] {s}")
+    lines.append(f"- Matched Required Skills: {matched_skills}")
+    lines.append(f"- Missing Required Skills (Gaps): {gaps_skills}")
 
     if report.core_strengths:
-        lines.append("")
-        lines.append("Core Strengths:")
-        for st in report.core_strengths:
-            lines.append(f"  • {st}")
+        lines.append(f"- Core Strengths: {', '.join(report.core_strengths[:3])}")
 
     if report.suggested_probe_questions:
         lines.append("")
         lines.append("Suggested Interview Probe Questions:")
-        for i, q in enumerate(report.suggested_probe_questions, 1):
+        for i, q in enumerate(report.suggested_probe_questions[:2], 1):
             lines.append(f"  {i}. {q}")
 
     return "\n".join(lines)
@@ -272,6 +251,8 @@ def clean_candidate_name(raw_name: Optional[str] = None, source: Optional[str] =
     """
     from pathlib import Path
 
+    noise_regex = r"(?i)\b(?:Resume|CV|Profile|Final|Updated|Dataset|Etc|Excel|Xlsx|Csv|Sheet|File|Document|\(\d+\))\b"
+
     if raw_name:
         cleaned = raw_name.strip()
         noise_titles = {
@@ -286,12 +267,16 @@ def clean_candidate_name(raw_name: Optional[str] = None, source: Optional[str] =
                 "",
                 cleaned
             ).strip()
-            if cleaned and cleaned.upper() not in noise_titles:
+            # Clean noise tokens like "etc", "excel", etc.
+            cleaned = re.sub(noise_regex, "", cleaned).strip()
+            cleaned = " ".join(cleaned.split())
+            if cleaned and cleaned.upper() not in noise_titles and len(cleaned) >= 2:
                 return cleaned.title()
 
     if source:
         stem = Path(source).stem.replace("_", " ").strip()
-        stem = re.sub(r"(?i)\b(?:Resume|CV|Profile|Final|Updated|Dataset|\(\d+\))\b", "", stem).strip()
+        stem = re.sub(noise_regex, "", stem).strip()
+        stem = " ".join(stem.split())
         if stem and len(stem) >= 2:
             return stem.title()
 
@@ -375,7 +360,7 @@ def analyze_top_candidates_for_jd(
     Discovers top matching candidates from Qdrant and runs fit analysis on each.
     Returns:
     - top_candidates: list of serialized CandidateFitReport dicts
-    - markdown_report: full comparative markdown report
+    - markdown_report: full comparative markdown report (concise, ASCII-only)
     - sources: list of source document names
     """
     top_matches = find_top_candidates_from_qdrant(jd_text, top_n=top_n)
@@ -412,59 +397,46 @@ def analyze_top_candidates_for_jd(
                 matched_required_skills=["Relevant experience matched from Qdrant vector retrieval"],
                 missing_required_skills=[],
                 core_strengths=["Direct semantic match to job description requirements"],
-                suggested_probe_questions=[f"Walk through your experience directly relevant to this job description."],
-                executive_summary=f"Automated evaluation: candidate's resume in Qdrant has strong relevance to the uploaded Job Description.",
+                suggested_probe_questions=["Walk through your experience directly relevant to this job description."],
+                executive_summary="Automated evaluation: candidate's resume in Qdrant has strong relevance to the uploaded Job Description.",
             ))
 
     # Rank highest match first
     reports.sort(key=lambda r: r.match_score_percent, reverse=True)
 
+    # Determine common target role if identified
+    target_role = reports[0].target_role if reports and reports[0].target_role else ""
+
     md_lines = [
         f"TOP {len(reports)} CANDIDATE MATCHES (KNOWLEDGE BASE RETRIEVAL)",
-        "The system evaluated resumes in the database against the uploaded Job Description.\n",
-        "CANDIDATE MATCH & COMPARISON SUMMARY:",
     ]
+    if target_role and target_role.lower() not in ("evaluated position", "not specified"):
+        md_lines.append(f"Target Role: {target_role}")
+    md_lines.append("The system evaluated resumes in the database against the uploaded Job Description.\n")
+    md_lines.append("CANDIDATE MATCH & COMPARISON SUMMARY:\n")
 
     for idx, r in enumerate(reports, 1):
         strengths_str = ", ".join(r.core_strengths[:2]) if r.core_strengths else "Verified experience"
         gaps_str = ", ".join(r.missing_required_skills[:2]) if r.missing_required_skills else "None detected"
         rec = "Recommended for Interview" if r.match_score_percent >= 80 else "Secondary Consideration" if r.match_score_percent >= 60 else "Low Fit"
-        md_lines.append(f"{idx}. {r.candidate_name} — {r.match_score_percent}% Match")
-        md_lines.append(f"   Target Role: {r.target_role}")
-        md_lines.append(f"   Key Strengths: {strengths_str}")
-        md_lines.append(f"   Identified Gaps: {gaps_str}")
-        md_lines.append(f"   Recommendation: {rec}")
-        md_lines.append("")
 
-    md_lines.append("------------------------------------------------------------\n")
-    md_lines.append("DETAILED CANDIDATE EVALUATION BREAKDOWN:\n")
+        md_lines.append(f"{idx}. {r.candidate_name} - {r.match_score_percent}% Match ({rec})")
+        md_lines.append(f"   - Key Strengths: {strengths_str}")
+        md_lines.append(f"   - Identified Gaps: {gaps_str}")
 
-    for idx, r in enumerate(reports, 1):
-        md_lines.append(f"Candidate {idx}: {r.candidate_name} ({r.match_score_percent}% Match)")
-        md_lines.append(f"Target Role: {r.target_role}")
-        md_lines.append(f"Executive Summary: {r.executive_summary}\n")
+        if r.executive_summary:
+            first_sentence = r.executive_summary.strip().split(". ")[0].strip()
+            if not first_sentence.endswith("."):
+                first_sentence += "."
+            md_lines.append(f"   - Summary: {first_sentence}")
 
-        if r.matched_required_skills:
-            md_lines.append("Matched Required Skills:")
-            for s in r.matched_required_skills:
-                md_lines.append(f"  • {s}")
-        if r.missing_required_skills:
-            md_lines.append("Missing Required Skills (Gaps):")
-            for s in r.missing_required_skills:
-                md_lines.append(f"  • {s}")
-        if r.core_strengths:
-            md_lines.append("Core Strengths:")
-            for st in r.core_strengths:
-                md_lines.append(f"  • {st}")
         if r.suggested_probe_questions:
-            md_lines.append("Suggested Interview Probe Questions:")
-            for q in r.suggested_probe_questions:
-                md_lines.append(f"  • {q}")
+            md_lines.append(f"   - Suggested Probe: {r.suggested_probe_questions[0]}")
         md_lines.append("")
 
     return {
         "top_candidates": [r.model_dump() for r in reports],
-        "markdown_report": "\n".join(md_lines),
+        "markdown_report": "\n".join(md_lines).strip(),
         "sources": list(dict.fromkeys(sources)),
     }
 
