@@ -2,25 +2,51 @@
 
 import { startTransition, useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   ArrowUpRight,
+  Bell,
   Bot,
   Briefcase,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   CircleAlert,
   FileText,
   FileUp,
+  Inbox,
   Loader2,
+  Mail,
   MessageSquare,
   Plus,
+  RefreshCw,
   Send,
   Sparkles,
   Target,
+  Trash2,
   UploadCloud,
   User,
   X,
 } from "lucide-react";
+
+interface PendingResumeItem {
+  id: string;
+  candidate_name: string;
+  email_sender: string;
+  source_channel: string;
+  received_at: string;
+  filename: string;
+  filesize_bytes: number;
+  file_path: string;
+  status: string;
+  is_duplicate: boolean;
+  duplicate_reason?: string;
+}
+
+interface PendingResumeResponse {
+  total_pending: number;
+  items: PendingResumeItem[];
+}
 
 interface Source {
   id: number | string;
@@ -195,6 +221,119 @@ export default function Home() {
   const [jdUploadStatus, setJdUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [jdUploadMessage, setJdUploadMessage] = useState("");
   const jdFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Inbound Resume Aggregator State
+  const [isInboxOpen, setIsInboxOpen] = useState(false);
+  const [pendingResumes, setPendingResumes] = useState<PendingResumeItem[]>([]);
+  const [selectedResumeIds, setSelectedResumeIds] = useState<string[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxActionLoading, setInboxActionLoading] = useState<string | null>(null);
+  const [inboxToast, setInboxToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const loadPendingResumes = async () => {
+    try {
+      setInboxLoading(true);
+      const res = await fetch("http://localhost:8000/inbox/pending-resumes");
+      if (res.ok) {
+        const data = await res.json();
+        setPendingResumes(data.items || []);
+      }
+    } catch (e) {
+      console.error("Failed to load inbound resumes:", e);
+    } finally {
+      setInboxLoading(false);
+    }
+  };
+
+  const handleSyncInbox = async () => {
+    try {
+      setInboxActionLoading("syncing");
+      setInboxToast(null);
+      const res = await fetch("http://localhost:8000/inbox/sync", { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setPendingResumes(data.items || []);
+        setInboxToast({ type: "success", text: "Successfully checked and synchronized Gmail & LinkedIn." });
+      }
+    } catch {
+      setInboxToast({ type: "error", text: "Failed to sync inbound channels." });
+    } finally {
+      setInboxActionLoading(null);
+    }
+  };
+
+  const handleIngestResumes = async (targetIds?: string[]) => {
+    try {
+      setInboxActionLoading(targetIds && targetIds.length === 1 ? targetIds[0] : "ingesting-all");
+      setInboxToast(null);
+      const idsToSend = targetIds || [];
+      const res = await fetch("http://localhost:8000/inbox/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resume_ids: idsToSend }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setInboxToast({
+          type: "success",
+          text: `Successfully ingested and indexed ${data.ingested_count} resume(s) into knowledge base.`,
+        });
+        setSelectedResumeIds([]);
+        await loadPendingResumes();
+      } else {
+        setInboxToast({ type: "error", text: "Failed to ingest resumes." });
+      }
+    } catch {
+      setInboxToast({ type: "error", text: "Network error ingesting resumes." });
+    } finally {
+      setInboxActionLoading(null);
+    }
+  };
+
+  const handleDenyResumes = async (targetIds: string[]) => {
+    try {
+      setInboxActionLoading(targetIds.length === 1 ? targetIds[0] : "denying-selected");
+      setInboxToast(null);
+      const res = await fetch("http://localhost:8000/inbox/deny", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resume_ids: targetIds }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setInboxToast({
+          type: "success",
+          text: `Denied and removed ${data.denied_count} redundant resume(s).`,
+        });
+        setSelectedResumeIds((prev) => prev.filter((id) => !targetIds.includes(id)));
+        await loadPendingResumes();
+      } else {
+        setInboxToast({ type: "error", text: "Failed to remove resume(s)." });
+      }
+    } catch {
+      setInboxToast({ type: "error", text: "Network error removing resumes." });
+    } finally {
+      setInboxActionLoading(null);
+    }
+  };
+
+  const toggleSelectResume = (id: string) => {
+    setSelectedResumeIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedResumeIds.length === pendingResumes.length) {
+      setSelectedResumeIds([]);
+    } else {
+      setSelectedResumeIds(pendingResumes.map((r) => r.id));
+    }
+  };
+
+  useEffect(() => {
+    loadPendingResumes();
+  }, []);
 
   useEffect(() => {
     try {
@@ -560,6 +699,22 @@ export default function Home() {
             <p className="brand-product">RAG Copilot</p>
           </div>
         </div>
+
+        <div className="topbar-actions">
+          <button
+            type="button"
+            className={`inbox-bell-btn ${pendingResumes.length > 0 ? "has-unread" : ""} ${isInboxOpen ? "active" : ""}`}
+            onClick={() => setIsInboxOpen((prev) => !prev)}
+            title="Inbound Resume Inbox (Gmail & LinkedIn)"
+            aria-label="Inbound Resume Notifications"
+          >
+            <Bell size={17} />
+            <span>Inbound Resumes</span>
+            {pendingResumes.length > 0 && (
+              <span className="bell-badge-count">{pendingResumes.length}</span>
+            )}
+          </button>
+        </div>
       </header>
 
       <div className="workspace">
@@ -877,6 +1032,198 @@ export default function Home() {
 
         </section>
       </div>
+
+      {/* Inbound Resume Triage Drawer / Modal */}
+      {isInboxOpen && (
+        <div className="inbox-backdrop" onClick={() => setIsInboxOpen(false)}>
+          <div className="inbox-drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="inbox-drawer-header">
+              <div className="inbox-title-group">
+                <h3>
+                  <Inbox size={20} style={{ color: "var(--teal)" }} />
+                  Inbound Resume Feed
+                </h3>
+                <p>Synced from connected Gmail &amp; LinkedIn via FastMCP</p>
+              </div>
+              <button
+                type="button"
+                className="inbox-close-btn"
+                onClick={() => setIsInboxOpen(false)}
+                title="Close drawer"
+                aria-label="Close inbox"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {inboxToast && (
+              <div className={`inbox-toast ${inboxToast.type}`}>
+                {inboxToast.type === "success" ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}
+                <span>{inboxToast.text}</span>
+              </div>
+            )}
+
+            <div className="inbox-toolbar">
+              <div className="inbox-bulk-actions">
+                {pendingResumes.length > 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "12px", color: "var(--ink)" }}>
+                    <input
+                      type="checkbox"
+                      className="inbox-checkbox"
+                      checked={selectedResumeIds.length === pendingResumes.length && pendingResumes.length > 0}
+                      onChange={toggleSelectAll}
+                    />
+                    <span>Select All</span>
+                  </label>
+                )}
+                <button
+                  type="button"
+                  className="btn-sync-inbox"
+                  onClick={handleSyncInbox}
+                  disabled={inboxActionLoading === "syncing"}
+                  title="Check connected inboxes for new resumes"
+                >
+                  <RefreshCw size={13} className={inboxActionLoading === "syncing" ? "spin" : ""} />
+                  <span>Sync</span>
+                </button>
+              </div>
+
+              <div className="inbox-bulk-actions">
+                {selectedResumeIds.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-deny-selected"
+                    onClick={() => handleDenyResumes(selectedResumeIds)}
+                    disabled={Boolean(inboxActionLoading)}
+                  >
+                    <Trash2 size={13} />
+                    <span>Deny Selected ({selectedResumeIds.length})</span>
+                  </button>
+                )}
+
+                {pendingResumes.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-ingest-all"
+                    onClick={() => handleIngestResumes(selectedResumeIds.length > 0 ? selectedResumeIds : undefined)}
+                    disabled={Boolean(inboxActionLoading)}
+                  >
+                    {inboxActionLoading === "ingesting-all" ? (
+                      <Loader2 size={13} className="spin" />
+                    ) : (
+                      <UploadCloud size={14} />
+                    )}
+                    <span>
+                      {selectedResumeIds.length > 0
+                        ? `Ingest Selected (${selectedResumeIds.length})`
+                        : `Ingest All (${pendingResumes.length})`}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="inbox-list-scroll">
+              {pendingResumes.length === 0 ? (
+                <div className="inbox-empty-state">
+                  <Inbox className="inbox-empty-icon" />
+                  <h4>All Inbound Resumes Cleared</h4>
+                  <p>All candidates have been processed. New resumes received on email or LinkedIn will appear here automatically.</p>
+                  <button
+                    type="button"
+                    className="btn-sync-inbox"
+                    style={{ marginTop: "16px", display: "inline-flex" }}
+                    onClick={handleSyncInbox}
+                  >
+                    <RefreshCw size={14} />
+                    <span>Check Inboxes Now</span>
+                  </button>
+                </div>
+              ) : (
+                pendingResumes.map((item) => {
+                  const isSelected = selectedResumeIds.includes(item.id);
+                  const isActioning = inboxActionLoading === item.id;
+                  const channelClass = item.source_channel.toLowerCase();
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`inbox-card ${item.is_duplicate ? "is-dup" : ""}`}
+                    >
+                      <div className="inbox-card-top">
+                        <div className="inbox-card-identity">
+                          <input
+                            type="checkbox"
+                            className="inbox-checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectResume(item.id)}
+                            aria-label={`Select ${item.candidate_name}`}
+                          />
+                          <div>
+                            <h4 className="candidate-name-title">{item.candidate_name}</h4>
+                            <p className="candidate-sender-meta">
+                              {item.email_sender} &bull; {new Date(item.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+
+                        <span className={`channel-tag ${channelClass}`}>
+                          {channelClass === "linkedin" ? "LinkedIn" : <Mail size={12} />}
+                          {channelClass !== "linkedin" && item.source_channel}
+                        </span>
+                      </div>
+
+                      {item.is_duplicate && (
+                        <div className="duplicate-alert-badge">
+                          <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+                          <span>{item.duplicate_reason || "Duplicate candidate detected"}</span>
+                        </div>
+                      )}
+
+                      <div className="inbox-card-footer">
+                        <div className="file-info-chip">
+                          <FileText size={12} />
+                          <span>{item.filename}</span>
+                          <span>&bull;</span>
+                          <span>{formatFileSize(item.filesize_bytes)}</span>
+                        </div>
+
+                        <div className="card-actions-group">
+                          <button
+                            type="button"
+                            className="btn-card-deny"
+                            onClick={() => handleDenyResumes([item.id])}
+                            disabled={Boolean(inboxActionLoading)}
+                            title="Deny and discard this redundant or unwanted resume"
+                          >
+                            <Trash2 size={12} />
+                            <span>Deny / Remove</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn-card-ingest"
+                            onClick={() => handleIngestResumes([item.id])}
+                            disabled={Boolean(inboxActionLoading)}
+                            title="Approve and index into knowledge base"
+                          >
+                            {isActioning ? (
+                              <Loader2 size={12} className="spin" />
+                            ) : (
+                              <Check size={12} />
+                            )}
+                            <span>Ingest</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

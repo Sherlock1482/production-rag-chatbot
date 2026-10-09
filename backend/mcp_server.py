@@ -178,10 +178,84 @@ def create_interview_event(
         )
     except Exception as e:
         print(f"MCP error in create_interview_event: {e}", file=sys.stderr)
+@mcp.tool()
+def fetch_inbound_resumes():
+    """
+    Fetch and synchronize inbound candidate resumes sent to the recruiter
+    across connected Email and LinkedIn channels.
+    """
+    try:
+        try:
+            from utils.inbound_resume_manager import InboundResumeManager
+        except ImportError:
+            from backend.utils.inbound_resume_manager import InboundResumeManager
+
+        manager = InboundResumeManager()
+        items = manager.sync_inbound_resumes()
+        pending = manager.get_pending_resumes()
         return {
-            "created": False,
+            "success": True,
+            "total_pending": pending.total_pending,
+            "items": [item.model_dump() for item in pending.items],
+        }
+    except Exception as e:
+        print(f"MCP error in fetch_inbound_resumes: {e}", file=sys.stderr)
+        return {
+            "success": False,
+            "total_pending": 0,
+            "items": [],
             "error": str(e),
         }
+
+
+@mcp.tool()
+def deny_inbound_resumes(resume_ids: list = None):
+    """
+    Deny / remove redundant or unwanted inbound resumes from the recruiter inbox.
+    """
+    try:
+        try:
+            from utils.inbound_resume_manager import InboundResumeManager, DenyResumeRequest
+        except ImportError:
+            from backend.utils.inbound_resume_manager import InboundResumeManager, DenyResumeRequest
+
+        manager = InboundResumeManager()
+        req = DenyResumeRequest(resume_ids=resume_ids or [])
+        res = manager.deny_resumes(req)
+        return res.model_dump()
+    except Exception as e:
+        print(f"MCP error in deny_inbound_resumes: {e}", file=sys.stderr)
+        return {
+            "success": False,
+            "denied_count": 0,
+            "message": str(e),
+        }
+
+
+@mcp.tool()
+def ingest_inbound_resumes(resume_ids: list = None):
+    """
+    Approve and batch ingest pending candidate resumes into the knowledge base (Qdrant & Neo4j).
+    """
+    try:
+        try:
+            from utils.inbound_resume_manager import InboundResumeManager, BatchIngestRequest
+        except ImportError:
+            from backend.utils.inbound_resume_manager import InboundResumeManager, BatchIngestRequest
+
+        manager = InboundResumeManager()
+        req = BatchIngestRequest(resume_ids=resume_ids or [])
+        res = manager.ingest_resumes(req)
+        return res.model_dump()
+    except Exception as e:
+        print(f"MCP error in ingest_inbound_resumes: {e}", file=sys.stderr)
+        return {
+            "success": False,
+            "ingested_count": 0,
+            "results": [],
+            "error": str(e),
+        }
+
 
 if __name__ == "__main__":
     mcp.run()

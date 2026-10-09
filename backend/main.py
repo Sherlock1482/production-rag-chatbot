@@ -77,6 +77,14 @@ from utils.context_manager import (
     is_candidate_context_reference,
     is_valid_candidate_name,
 )
+from utils.inbound_resume_manager import (
+    InboundResumeManager,
+    PendingResumeResponse,
+    BatchIngestRequest,
+    BatchIngestResponse,
+    DenyResumeRequest,
+    DenyResumeResponse,
+)
 
 
 # ============================================================
@@ -569,6 +577,65 @@ def health_check():
         "status": "healthy",
         "domain": "Talent Acquisition (TA)"
     }
+
+
+# ============================================================
+# Inbound Resume Inbox Endpoints (Email & LinkedIn FastMCP)
+# ============================================================
+
+inbox_manager = InboundResumeManager()
+
+
+@app.get("/inbox/pending-resumes", response_model=PendingResumeResponse)
+def get_pending_inbound_resumes():
+    """
+    Get all pending un-reviewed resumes from Email and LinkedIn.
+    Seeds/syncs items if queue is empty.
+    """
+    pending = inbox_manager.get_pending_resumes()
+    if pending.total_pending == 0:
+        inbox_manager.sync_inbound_resumes()
+        pending = inbox_manager.get_pending_resumes()
+    return pending
+
+
+@app.post("/inbox/sync", response_model=PendingResumeResponse)
+def sync_inbound_resumes_endpoint():
+    """
+    Force synchronize external Email & LinkedIn channels via FastMCP.
+    """
+    inbox_manager.sync_inbound_resumes()
+    return inbox_manager.get_pending_resumes()
+
+
+@app.post("/inbox/ingest", response_model=BatchIngestResponse)
+def batch_ingest_inbound_resumes(request: BatchIngestRequest):
+    """
+    Approve and ingest selected or all pending resumes into the Qdrant knowledge base.
+    """
+    with langfuse.start_as_current_observation(
+        as_type="span",
+        name="batch-inbound-ingest",
+        input={"resume_ids": request.resume_ids},
+    ) as span:
+        response = inbox_manager.ingest_resumes(request)
+        span.update(output=response.model_dump())
+        return response
+
+
+@app.post("/inbox/deny", response_model=DenyResumeResponse)
+def deny_inbound_resumes_endpoint(request: DenyResumeRequest):
+    """
+    Deny / remove redundant or unwanted resumes from the pending inbox.
+    """
+    with langfuse.start_as_current_observation(
+        as_type="span",
+        name="deny-inbound-resumes",
+        input={"resume_ids": request.resume_ids},
+    ) as span:
+        response = inbox_manager.deny_resumes(request)
+        span.update(output=response.model_dump())
+        return response
 
 
 # ============================================================

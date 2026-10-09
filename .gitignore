@@ -4,6 +4,7 @@ __pycache__/
 .next/
 node_modules/
 
+ta_interviews.db
 credentials.json
 token.json
 .env
@@ -19,3 +20,4 @@ k8s/01-secrets.yaml
 # Local chat history and uploads
 backend/data/chat_history.json
 backend/data/uploads/
+backend/data/inbox_stag
